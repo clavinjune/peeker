@@ -1,6 +1,49 @@
 # Verification — 2026-11-11
 
-Executed on macOS arm64 against the existing **rancher-desktop** cluster. These are observed results, not expected outputs. Peeker uses request-scoped memory only and has no database.
+Executed on macOS arm64. The v0.0.2 checks below use controlled loopback fixtures; earlier sections also record live **rancher-desktop** verification. These are observed results, not expected outputs. Peeker keeps cluster data in bounded, short-lived memory and has no database.
+
+## v0.0.2 release verification
+
+```text
+bash scripts/build.sh: passed; frozen lockfile, TypeScript, 918 Vite modules, React SSG, embedded Go build
+bun test web/tests: 9 passed, 42 assertions
+python3 -m unittest discover -s scripts -p 'test_*.py': 4 passed
+go test -race ./...: passed across all packages
+go vet ./...: passed
+go mod verify: all modules verified
+go tool deadcode ./...: no unreachable functions
+go tool govulncheck ./...: no vulnerabilities found
+bun audit --cwd web: no vulnerabilities found across 88 packages
+go tool fieldalignment ./...: 17 advisory layout suggestions, exit 3
+git diff --check: passed
+```
+
+### Inventory, MCP and Permissions
+
+- Backend regressions cover namespace-first requests, explicit all-namespace scope, pending/cancelled assessments, stable risk/review/name ordering across pages, complete filtered summaries, hiding, refresh isolation, cache deduplication/expiry, snapshot expiry/eviction/capacity, wrong-scope rejection and closed-context admission. Removed obsolete frontend sorting and moved its ordering checks to the production backend paging path.
+- Chrome exercised a 130-pod fixture: the default namespace was selected, backend pages held 100 rows, and the virtual viewport rendered at most 14 rows. Hiding one owning ReplicaSet removed 13 pods across pages and changed totals from 130 to 117 and critical findings from 1 to 0. Next-page navigation showed rows 101–117 and reset scrolling.
+- Namespace switching selected the fixture's three `team-a` pods. Name filtering produced both an explicit empty result and a single matching row. A browser-injected namespace-discovery denial exercised manual scope entry; clearing the field made no cluster-wide request. All namespaces required explicit selection. A deliberately invalid snapshot produced the real backend HTTP 410; Refresh restarted successfully with a new snapshot.
+- Pod detail navigation and the Permissions tab showed `ServiceAccount default/app`, a cross-namespace `RoleBinding team-a/read-settings`, its `Role reader`, namespace scope, `get,list`, and the named ConfigMap restriction `settings`, with expandable evidence. Backend regressions also cover benign and non-resource URL grants, denied inventories, default ServiceAccount fallback and output-field allowlisting.
+- Official MCP SDK subprocess tests initialized stdio, listed the four read-only tools, read status, exited cleanly on EOF and verified managed-proxy cleanup. HTTP MCP tests still pass. Stdio starts no browser listener and uses the current kubeconfig context when neither a context nor an external proxy is specified.
+- The embedded skill documents both transports, snapshot traversal, severity bands, distinct-finding aggregation, pending/partial results, supported checks, configured RBAC grants and assessment limitations. Existing installed skill files are preserved by the installer; upgrading an old copy requires manual review/replacement.
+
+### Publication review and limitations
+
+- Semgrep `p/security-audit` and `p/secrets` ran 175 applicable rules over 69 source/configuration files with zero findings or errors; normal test, dependency and generated-file exclusions applied. The full publishable-file credential/path review additionally included tests and generated assets. Its only matches were deliberately fictitious rejection-test values and their historical documentation.
+- The generated-asset checker accepted exactly the three linked static files below. No credentials, actual workstation paths, cluster snapshots, source maps or development entry points were detected. Temporary fixtures, binaries, dependencies, toolchains and scan results are ignored. Commits use the existing public bot noreply identity.
+- Ripwire contract checks found no incompatible callers for the checked backend/UI entry points. Its test map named 18 Go test files, all covered by the full race run, and seven frontend symbols without indexed automated reach; changed UI interactions were checked in Chrome. These structural results are not an automated end-to-end browser test suite.
+- Quality-delta against `75c3da32d` reported four gating structural notices: three short-horizon changes in `Client.snapshot`, `Handler` and CLI `run`, plus similarity between the two small typed RBAC/peer memoizers. These are reviewed trade-offs for the requested cache/transport changes; the memoizers remain separate rather than introducing a shared abstraction for two uses. Non-gating results include new-function complexity, minor existing-function growth and Go test entry points misidentified as dead code. This is not a clean quality-gate claim.
+- Field-layout suggestions remain advisory. Vite reports a nonfatal JavaScript chunk-size warning (approximately 525 kB before compression). No benchmark was run, and collection/job limits are not measured cluster-capacity claims.
+- This release received focused tests, scans and fixture browser verification, not a new comprehensive independent security audit or live-cluster retest. RBAC permissions describe configured grants; other authorizers, admission and credential usability remain outside the assessment.
+- Chrome reported no application exceptions or hydration warnings; the final deliberate snapshot-rejection check produced the expected HTTP 410 console entry. Temporary fixture processes and the verification browser page were stopped afterward.
+
+Generated asset SHA-256 values:
+
+```text
+b96b631eab2a453fc89945030e954da415835d668032cf8c7d604b71a966c785  web/dist/assets/index-CT3vrKDC.js
+e66bbba5038c9486d52c98c4559f85ca41a562d89685473b7e813326af398d0e  web/dist/assets/index-DDcKAgJo.css
+285f2987a4f402cfb611e43fb8f379e583ca78f7628e1e0adb8834bcaf616dc0  web/dist/index.html
+```
 
 ## v0.0.1 release verification
 

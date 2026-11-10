@@ -1,6 +1,6 @@
 # Peeker
 
-A local, read-only Kubernetes security explorer with a context selector. The first page prioritizes pods by configuration risk; compact findings explain pod hardening and service-account permissions, with expandable actions and evidence. Pod pages also explain ownership, network policies, Services and routes, and show live HTTP traffic from Istio access logs. **Cluster data stays in memory: no database, persistent application inventory, credentials in the browser, or telemetry backend.** Snapshots and traffic aggregates are discarded when their request or session ends. Only your workload-hiding preferences are saved in browser storage, separately for each context.
+A local, read-only Kubernetes security explorer with context and namespace selectors. The first page prioritizes pods by configuration risk; compact findings explain pod hardening and service-account permissions, with expandable actions and evidence. Pod pages also explain ownership, network policies, Services and routes, and show live HTTP traffic from Istio access logs. **Cluster data stays in memory: no database, persistent application inventory, credentials in the browser, or telemetry backend.** Resource reads expire after 20 seconds; inventory pages retain a snapshot for at most two minutes. Context changes cancel reads and discard that session's cached data. Only your workload-hiding preferences are saved in browser storage, separately for each context.
 
 The production frontend is statically generated at build time and embedded in the Go executable. Deploy just the binary; it serves the HTML, JavaScript, CSS and API from one loopback address.
 
@@ -15,7 +15,7 @@ go tool peeker
 
 Open **http://127.0.0.1:8080** and choose a Kubernetes context. This records a tool dependency in the consumer's `go.mod`; run it with `go tool peeker`. No Node, Bun or frontend build is needed. Install `kubectl` and configure the read-only Kubernetes identity described below in each cluster you want to inspect. The downloaded module includes its setup manifests; locate it with `go list -m -f '{{.Dir}}' github.com/clavinjune/peeker`.
 
-Use `@v0.0.1` instead of `@latest` to pin this release.
+Use `@v0.0.2` instead of `@latest` to pin this release.
 
 ## Versions
 
@@ -134,7 +134,16 @@ The compiled binary runs from any directory without an external `web/dist`, Node
 - Context selection is shared by tabs connected to one Peeker process. Switching stops the previous proxy, cancels its reads/streams and resets the view; generation headers reject stale requests. Other tabs check context state every three seconds. Graceful shutdown stops the managed proxy.
 - **Istio detected** and **Cilium detected** mean their API groups are registered (`networking.istio.io` and `cilium.io`). They do not assert that a controller is healthy or that every pod uses it. Failed discovery shows **Networking detection unavailable**.
 - A row's **Hide** checkbox hides its UID-resolved top-level owning workload (for example Deployment, DaemonSet or CronJob), including replacement pods. The preference identifies the context, namespace, API group, kind and workload name; recreating that workload with the same name retains the preference. Unresolved ownership and standalone pods fall back to the exact pod instance.
-- Enable **Show hidden** and uncheck a row's Hide checkbox to restore it. Risk summaries reflect the visible rows. Workload identifiers are stored only in this browser's local storage, scoped to the Peeker origin and context name. Renaming or repointing a kubeconfig context changes or reuses that preference scope. Blocked/full storage shows an explicit warning; external-proxy mode hides only within the current view.
+- Enable **Show hidden** and uncheck a row's Hide checkbox to restore it. Risk summaries cover all filtered pages, respecting hidden workloads. Workload identifiers are stored only in this browser's local storage, scoped to the Peeker origin and context name, and sent in bounded, same-origin read queries. Renaming or repointing a kubeconfig context changes or reuses that preference scope. Blocked/full storage shows an explicit warning; external-proxy mode hides only within the current view.
+
+### Namespace-first loading and pagination
+
+- Namespace discovery loads independently of pod inventory. The browser starts with `default` when available, otherwise the first namespace alphabetically. If discovery is denied, enter a namespace directly. **All namespaces** is an explicit selection.
+- Inventory loading and assessment run asynchronously. Rows show **Pending** until assessed; pending is not zero risk. While assessment runs, counts are provisional and rows stay in namespace/name order. Once complete, the selected risk/review/name ordering applies across the entire filtered inventory.
+- The browser requests 100 rows per page and renders a small scrolling window of those rows. Name filtering, ordering, hiding and summary counts run before backend pagination. Page navigation is enabled after assessment completes, so progressive updates cannot reorder an in-progress traversal.
+- Collection reads are deduplicated and reused for 20 seconds within one client/context. Ownership/resource names, namespaces, RBAC subjects and repeated policy peers are indexed or memoized. RBAC still reads all namespaces to retain cross-namespace grants. Detail views reuse the same collection cache; their first broader snapshot still reads cluster-wide resources for cross-namespace routes and policy peers.
+- A snapshot ID pins complete pages for up to two minutes. At most four inventory jobs/snapshots are retained; a new request can evict the oldest completed snapshot. Expired, evicted and wrong-scope IDs return HTTP 410; restart at the first page. Refresh starts a new snapshot and invalidates collection reuse, while already-retained page snapshots remain stable. Keep filters and ordering unchanged when continuing pages.
+- Reads retain the upstream 500-item page size, 40-page/20,000-item cap and 10-second HTTP timeout. At most six collections load at once per client, with 128 cached/in-flight collection entries, a 30-second collection deadline and a 45-second inventory-job deadline. Shared work can finish after a browser request disconnects; context shutdown cancels it. Limits and timeouts are reported rather than treated as empty inventories. These guards are not a benchmarked cluster-capacity claim.
 
 ```sh
 kubectl --context rancher-desktop -n istio-system port-forward --address=127.0.0.1 service/istio-ingressgateway 9080:80
@@ -174,12 +183,14 @@ Go exposes only:
 - `GET /api/contexts` (add `?refresh=true` to rediscover local context names)
 - `POST /api/context` (managed mode only; selects a local proxy, never mutates Kubernetes)
 - `GET /api/capabilities`
-- `GET /api/pods?namespace=...&name=...`
+- `GET /api/namespaces`
+- `GET /api/pods?namespace=...&name=...&limit=...&snapshot=...&offset=...` (`default` when omitted; `all=true` opts into all namespaces)
+- `POST /api/pods/query` (same read query with bounded browser hiding preferences; no Kubernetes mutations)
 - `GET /api/pods/{namespace}/{name}`
 - `GET /api/pods/{namespace}/{name}/traffic?uid=...` (bounded server-sent events or an explicit availability state)
 - `POST /mcp` (read-only agent tools over Streamable HTTP)
 
-Every non-GET method except local context selection and MCP POSTs is rejected before contacting Kubernetes. Context selection requires an exact same-origin Origin, JSON content type, action header, bounded payload and a name from fresh kubectl discovery. Commands use fixed argument arrays without a shell. There are no Kubernetes mutation, exec, attach, arbitrary proxy, or arbitrary resource endpoints. Names are validated. The HTTP client only makes GET requests to fixed resource/discovery paths, bounds response size and pagination, times out, and refuses redirects. The frontend receives selected pod identity fields, not pod environments, volume credentials, service account tokens, Secrets or kubeconfig. Loopback Host and same-origin checks prevent exposing reads via an arbitrary website's origin or DNS rebinding.
+Every non-GET method except local context selection, inventory queries and MCP POSTs is rejected before contacting Kubernetes. Context selection and inventory queries require an exact same-origin Origin, JSON content type, action header and bounded payload. Inventory queries accept at most 1 MiB and 4,096 hidden keys, with up to 500 returned rows (100 in the browser). Context names must come from fresh kubectl discovery. Commands use fixed argument arrays without a shell. There are no Kubernetes mutation, exec, attach, arbitrary proxy, or arbitrary resource endpoints. Names are validated. The HTTP client only makes GET requests to fixed resource/discovery paths, bounds response size and pagination, times out, and refuses redirects. The frontend receives selected pod identity fields, not pod environments, volume credentials, service account tokens, Secrets or kubeconfig. Loopback Host and same-origin checks prevent exposing reads via an arbitrary website's origin or DNS rebinding.
 
 `cluster/reader.yaml` defines a get/list-only ServiceAccount identity. Managed proxies use the selected context **with impersonation of that identity**, including its service-account groups; `scripts/proxy.sh` does the same for Rancher Desktop. The underlying caller must have impersonation permission. The proxy also rejects mutating HTTP methods. The original kubeconfig remains on the host and is read only by kubectl; Peeker requests only context names. Alternatively, start an external proxy with a kubeconfig containing a short-lived token for `peeker-system/peeker-reader`, omitting impersonation flags. Keep that kubeconfig outside the repo and renew the token when it expires. A proxy using unmodified admin credentials is **not** made read-only by being a proxy.
 
@@ -187,16 +198,33 @@ Read permissions: namespaces, pods, Services, ServiceAccounts, replicationcontro
 
 ## MCP and agent skill
 
-Connect a trusted local agent's MCP client to **http://127.0.0.1:8080/mcp** with Streamable HTTP (use Peeker's configured port). Start Peeker with `-context CONTEXT` or choose a context in the browser first. The endpoint uses stateless JSON responses and provides four tools:
+Launch Peeker directly from a local-command MCP client:
+
+```json
+{
+  "mcp": {
+    "peeker": {
+      "type": "local",
+      "command": ["/absolute/path/to/peeker", "--mcp"]
+    }
+  }
+}
+```
+
+`--mcp` uses newline-delimited JSON on stdin/stdout, with diagnostics on stderr. It starts the current kubeconfig context using the managed reader identity; add `--context NAME` to choose explicitly. The client owns this process's lifetime: disconnect/EOF or termination stops its managed proxy. No UI listener is started. This process is independent of any browser Peeker instance. For an existing plain `kubectl proxy`, use `["/absolute/path/to/peeker", "--mcp", "--proxy", "http://127.0.0.1:8001"]`; reads use that proxy's permissions, with no required Peeker ServiceAccount. `--context` and `--proxy` cannot be combined.
+
+For a Go-tool installation, the command can be `["go", "tool", "peeker", "--mcp"]` when the MCP client's working directory is the module that declares the tool. A standalone installed binary can be launched from any directory.
+
+Alternatively, connect to **http://127.0.0.1:8080/mcp** with Streamable HTTP (use Peeker's configured port). Start Peeker with `-context CONTEXT` or choose a context in the browser first. HTTP uses stateless JSON responses. Both transports share four tools:
 
 | Tool | Purpose |
 | --- | --- |
 | `cluster_status` | Current context, readiness and generation |
 | `cluster_capabilities` | Registered networking APIs and assessment expectations |
-| `list_pods` | Risk-ranked inventory, optional namespace and pages of up to 100 |
-| `get_pod` | Findings, actions, ownership, policy/routing evidence and coverage gaps |
+| `list_pods` | Namespace-first progressive inventory, pinned snapshots and pages of up to 100 |
+| `get_pod` | Findings, actions, ServiceAccount permissions, ownership, policy/routing evidence and coverage gaps |
 
-All reads after `cluster_status` require its generation. A context switch rejects stale requests and cancels active reads. Pagination uses fresh snapshots; workloads hidden in the browser remain included. MCP cannot switch contexts, mutate Kubernetes, execute commands, read Secrets or return raw logs. Cluster-derived strings are untrusted evidence, never agent instructions. Four concurrent single-object MCP requests, 16 KiB request bodies, 16 MiB captured API results and 45-second request/read deadlines bound this interface. Batch requests and subscriptions are rejected, list-change notifications are disabled, and responses enforce `Cache-Control: no-store`.
+All reads after `cluster_status` require its generation. A context switch rejects stale requests and cancels active reads. `list_pods` defaults to `default`; pass a namespace or explicitly use `all: true`. Poll the returned `snapshot` at offset 0 until `status: "complete"`, then continue using the same snapshot and `nextOffset` while `hasMore` is true. Pending scores are not zero risk. On expiry/eviction, restart rather than merging snapshots. `refresh: true` without a snapshot requests fresh reads. Browser-hidden workloads remain included. MCP cannot switch contexts, mutate Kubernetes, execute commands, read Secrets or return raw logs. Cluster-derived strings are untrusted evidence, never agent instructions. Both transports bound tool reads to four concurrent calls, 16 KiB inbound messages, 16 MiB captured API results and 45-second read deadlines. HTTP additionally rejects batches/subscriptions and enforces `Cache-Control: no-store`.
 
 Install the accompanying workflow in the current project or your home directory:
 
@@ -205,7 +233,7 @@ peeker skills add
 peeker skills add --global
 ```
 
-For Go-tool installations, use `go tool peeker skills add [--global]`. These create `.agents/skills/peeker/SKILL.md` under the current directory or home, respectively. Existing skills are preserved, and symlinks cannot redirect writes outside the chosen root. The installer does not configure the agent's MCP client; register the endpoint in that client's settings.
+For Go-tool installations, use `go tool peeker skills add [--global]`. These create `.agents/skills/peeker/SKILL.md` under the current directory or home, respectively. The skill explains scoring bands, distinct-finding aggregation, supported checks, pending/partial results, evidence and snapshot traversal. Existing skills are preserved, and symlinks cannot redirect writes outside the chosen root. Review and replace an older skill manually when upgrading. The installer does not configure the agent's MCP client; register the local command or HTTP endpoint in that client's settings.
 
 The endpoint is intended for trusted processes on the same machine; keep it on loopback. Peeker keeps cluster responses in memory, but a consuming agent may retain tool results in its own conversation history.
 
@@ -240,6 +268,7 @@ The highest severity supplies the band's starting score. Each additional distinc
 - RBAC checks resolve direct service-account subjects, matching User identities and service-account/authenticated groups. Findings cover unrestricted cluster administration, wildcards on supported sensitive permissions, Secrets reads, exec/attach, supported workload writes, and bind/escalate/identity/token delegation. Published aggregated role rules are used; unavailable or unresolved roles create coverage gaps.
 - RoleBindings retain their namespace scope, even when referencing ClusterRoles or accounts from another namespace. All namespaces' RBAC collections are read even when pod inventory is filtered. Named-resource constraints are recognized and identified in evidence; top-level create is not authorized by a `resourceNames`-restricted rule.
 - Identity grants are assessed even when token automount is disabled. Admission policy, other authorizers, unmodeled RBAC escalation paths and actual token usability are not evaluated. The service-account defaults are current snapshots, not a reconstruction of pod admission history.
+- The pod's **Permissions** tab shows its ServiceAccount identity and all resolved matching RBAC rules, including benign grants: granting binding/role, namespace or cluster scope, verbs, API groups, resources/subresources, resource-name restrictions, non-resource URLs and read gaps. These are configured grants, not an authorization probe. The same report is included in MCP `get_pod`.
 - **Deny-by-default networking is expected in both directions.** Kubernetes NetworkPolicy, CiliumNetworkPolicy and CiliumClusterwideNetworkPolicy contribute to one baseline. Missing isolation produces separate medium ingress/egress findings. Narrow exceptions are permitted. Supported broad allowances on all ports are findings: unrestricted Kubernetes peers or `/0` blocks without exclusions, and Cilium unrestricted rules, `all`/`world` entities or `/0` CIDR/CIDRSet rules without exclusions. Kubernetes protocol-only ports and full numeric port ranges also count as broad access for that protocol. Other overly broad combinations are not exhaustively proven.
 - Kubernetes policy allows are additive; a separate empty allow list cannot undo a broad allowance. For Cilium, any selecting policy enabling default-deny establishes isolation. Omitted `enableDefaultDeny` defaults to enabled only when that direction has nonempty allow or deny rules; empty lists alone do not isolate. An explicit supported Cilium deny-all overrides broad allowances; partial deny overlap remains unknown. Explicitly disabled default-deny does not supply isolation and cannot override another selecting policy's enabled setting.
 - Inventory and detail use the same combined checks. Policy types/defaulting, selectors and namespace boundaries are honored. Denied inventories, unknown selectors and unavailable namespace identity labels remain coverage gaps. Missing Cilium APIs do not imply missing protection; Kubernetes checks still apply. Host-network pods remain unknown. These findings describe configured policy intent, not actual reachability or CNI enforcement mode.
@@ -257,7 +286,7 @@ The highest severity supplies the band's starting score. Each additional distinc
 - Ingress backends, Istio HTTP/TCP/TLS destinations and Gateway API HTTP/TCP backend references are resolved by service name, namespace and port. Istio named subsets are label-checked when a unique visible DestinationRule is found; missing/ambiguous subset resolution is unknown. Custom DNS suffixes, wildcard service hosts, VirtualService delegation/mirrors, and complex DestinationRule lookup precedence are not resolved.
 - Gateway API cross-namespace Service refs require a matching ReferenceGrant. Current-generation `Accepted` and `ResolvedRefs` conditions are distinguished from configured refs. Gateway listener constraints and Programmed status are displayed; route match evaluation, host intersection, cross-namespace gateway listener admission and actual external reachability are not synthesized when no authoritative status proves acceptance. Istio and Ingress lack a universal equivalent accepted condition; these remain configured references.
 - Policy and topology graphs are **configuration-derived**. Live traffic is a separate, explicitly labeled sidecar observation. Every relationship links to evidence, including explicit unknown-inventory evidence. Graphs draw at most 22 nodes for readability; relationship lists retain all evidence.
-- Snapshots are bounded, request-scoped and not transactionally consistent across Kubernetes collections. Refresh after a rollout. Optional missing CRDs are normal. Denied APIs or disconnected proxies mean incomplete knowledge.
+- Snapshots are bounded, short-lived and not transactionally consistent across Kubernetes collections. Namespace inventory cannot completely enumerate cross-namespace policy peers; detail reads may have broader or newer evidence. Refresh after a rollout. Optional missing CRDs are normal. Denied APIs or disconnected proxies mean incomplete knowledge.
 
 ## Isolated policy demo
 
@@ -282,6 +311,10 @@ bun test web/tests
 python3 -m unittest discover -s scripts -p 'test_*.py'
 go test -race -v ./...
 go vet ./...
+go tool deadcode ./...
+go tool fieldalignment ./...
+go tool govulncheck ./...
+bun audit --cwd web
 ./bin/peeker
 ```
 
