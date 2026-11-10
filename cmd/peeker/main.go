@@ -30,11 +30,12 @@ func main() {
 	proxy := flag.String("proxy", os.Getenv("KUBECTL_PROXY_URL"), "Use an external loopback proxy instead of managing contexts")
 	expectIstio := flag.Bool("expect-istio", true, "Report pods without an istio-proxy sidecar")
 	contextName := flag.String("context", "", "Start this kubeconfig context immediately")
+	stdio := flag.Bool("mcp", false, "Run MCP over stdin/stdout; defaults to the current kubeconfig context")
 	flag.Parse()
 	if flag.NArg() != 0 {
 		log.Fatal("unexpected arguments; use peeker skills add [--global] or peeker -h")
 	}
-	if err := run(*listen, *proxy, *contextName, *expectIstio); err != nil {
+	if err := run(*listen, *proxy, *contextName, *expectIstio, *stdio); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -65,44 +66,68 @@ func installSkill(args []string) error {
 	return err
 }
 
-func run(listen, proxy, contextName string, expectIstio bool) error {
-	host, _, err := net.SplitHostPort(listen)
-	if err != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
-		return errors.New("listen must use a loopback IP address")
+func clusterHandler(ctx context.Context, assets fs.FS, proxy, contextName string, expectIstio bool) (http.Handler, func(), error) {
+	manager := explorer.NewContextManager(assets)
+	manager.Assessment.ExpectIstio = expectIstio
+	if proxy != "" && contextName != "" {
+		manager.Close()
+		return nil, nil, errors.New("-context cannot be combined with an external proxy")
+	}
+	if contextName != "" {
+		ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		if err := manager.Select(ctx, contextName); err != nil {
+			manager.Close()
+			return nil, nil, err
+		}
+	}
+	if proxy != "" {
+		manager.Close()
+		client, err := explorer.NewClient(proxy)
+		if err != nil {
+			return nil, nil, err
+		}
+		client.Assessment.ExpectIstio = expectIstio
+		return explorer.Handler(client, assets), client.Close, nil
+	}
+	return manager.Handler(), manager.Close, nil
+}
+
+func run(listen, proxy, contextName string, expectIstio, stdio bool) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if stdio && proxy == "" && contextName == "" {
+		var err error
+		contextName, err = explorer.CurrentContext(ctx)
+		if err != nil {
+			return err
+		}
 	}
 	assets, err := fs.Sub(web.Assets, "dist")
 	if err != nil {
 		return err
 	}
-	manager := explorer.NewContextManager(assets)
-	manager.Assessment.ExpectIstio = expectIstio
-	defer manager.Close()
-	if proxy != "" && contextName != "" {
-		return errors.New("-context cannot be combined with an external proxy")
+	handler, closeCluster, err := clusterHandler(ctx, assets, proxy, contextName, expectIstio)
+	if err != nil {
+		return err
 	}
-	if contextName != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if err := manager.Select(ctx, contextName); err != nil {
-			return err
+	defer closeCluster()
+	if stdio {
+		err := explorer.RunMCP(ctx, handler)
+		if errors.Is(err, context.Canceled) {
+			return nil
 		}
+		return err
 	}
-	handler := manager.Handler()
-	if proxy != "" {
-		client, err := explorer.NewClient(proxy)
-		if err != nil {
-			return err
-		}
-		client.Assessment.ExpectIstio = expectIstio
-		handler = explorer.Handler(client, assets)
+	host, _, err := net.SplitHostPort(listen)
+	if err != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
+		return errors.New("listen must use a loopback IP address")
 	}
 	server := &http.Server{Addr: listen, Handler: explorer.MCPHandler(handler), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	closed := make(chan struct{})
 	go func() {
 		<-ctx.Done()
-		manager.Close()
+		closeCluster()
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		server.Shutdown(shutdown)

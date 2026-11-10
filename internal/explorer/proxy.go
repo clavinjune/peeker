@@ -26,6 +26,22 @@ type contextRunner interface {
 
 type kubectlRunner struct{}
 
+func CurrentContext(ctx context.Context) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "kubectl", "config", "current-context")
+	output := &boundedOutput{limit: 2048}
+	cmd.Stdout, cmd.Stderr, cmd.WaitDelay = output, io.Discard, time.Second
+	if cmd.Run() != nil {
+		return "", errors.New("Cannot read current context; specify --context or --proxy")
+	}
+	name := strings.TrimSpace(output.String())
+	if name == "" || len(name) > 1024 || strings.ContainsAny(name, "\x00\r\n") {
+		return "", errors.New("Invalid current context")
+	}
+	return name, nil
+}
+
 type boundedOutput struct {
 	bytes.Buffer
 	limit int
