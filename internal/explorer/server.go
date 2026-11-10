@@ -3,11 +3,11 @@ package explorer
 import (
 	"context"
 	"encoding/json"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -22,8 +22,31 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 func problem(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
 }
-func Handler(client *Client, staticDir string) http.Handler {
+func frontendHandler(assets fs.FS) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" || strings.HasPrefix(r.URL.Path, "/pods/") {
+			w.Header().Set("Cache-Control", "no-cache")
+			http.ServeFileFS(w, r, assets, "index.html")
+			return
+		}
+		path := strings.TrimPrefix(r.URL.Path, "/")
+		if !strings.HasPrefix(path, "assets/") || !fs.ValidPath(path) {
+			http.NotFound(w, r)
+			return
+		}
+		info, err := fs.Stat(assets, path)
+		if err != nil || info.IsDir() {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		http.ServeFileFS(w, r, assets, path)
+	})
+}
+
+func Handler(client *Client, assets fs.FS) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/pods/{namespace}/{name}/traffic", trafficHandler(client))
 	mux.HandleFunc("GET /api/pods", func(w http.ResponseWriter, r *http.Request) {
 		ns := r.URL.Query().Get("namespace")
 		if ns != "" && !validName(ns, true) {
@@ -37,18 +60,12 @@ func Handler(client *Client, staticDir string) http.Handler {
 			writeJSON(w, 502, map[string]any{"error": s["pods"].State.Message, "states": s.states()})
 			return
 		}
-		pods := []PodView{}
+		pods := inventoryPods(s, r.URL.Query().Get("name"), client.Assessment)
 		names := []string{}
-		for _, p := range s.items("pods") {
-			if strings.Contains(name(p), r.URL.Query().Get("name")) {
-				pods = append(pods, podView(p, s))
-			}
-		}
 		for _, n := range s.items("namespaces") {
 			names = append(names, name(n))
 		}
 		sort.Strings(names)
-		sort.Slice(pods, func(i, j int) bool { return pods[i].Namespace+"/"+pods[i].Name < pods[j].Namespace+"/"+pods[j].Name })
 		writeJSON(w, 200, map[string]any{"pods": pods, "namespaces": names, "states": s.states()})
 	})
 	mux.HandleFunc("GET /api/pods/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) {
@@ -69,30 +86,26 @@ func Handler(client *Client, staticDir string) http.Handler {
 			problem(w, 404, "Pod not found in the successfully read pod inventory. It may have been replaced; refresh the list.")
 			return
 		}
-		writeJSON(w, 200, map[string]any{"pod": podView(p, s), "policies": networkPolicies(p, s), "routing": routing(p, s), "states": s.states(), "capturedAt": time.Now().UTC().Format(time.RFC3339)})
+		security := assessPod(p, s, client.Assessment)
+		view := podView(p, s)
+		view.Risk = security.Risk
+		writeJSON(w, 200, map[string]any{"pod": view, "security": security, "policies": networkPolicies(p, s), "routing": routing(p, s), "states": s.states(), "capturedAt": time.Now().UTC().Format(time.RFC3339)})
 	})
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, map[string]string{"status": "running", "storage": "memory only", "context": "rancher-desktop (proxy must target this context)"})
+		writeJSON(w, 200, map[string]string{"status": "running", "storage": "memory only"})
 	})
+	mux.HandleFunc("GET /api/contexts", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, ContextInfo{Mode: "external", Current: "External proxy", Generation: "external", Status: "ready", Contexts: []string{}})
+	})
+	mux.HandleFunc("GET /api/capabilities", capabilityHandler(client))
 	mux.HandleFunc("GET /api/", func(w http.ResponseWriter, r *http.Request) { problem(w, 404, "Unsupported read endpoint") })
-	if staticDir != "" {
-		files := http.FileServer(http.Dir(staticDir))
-		mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/" || strings.HasPrefix(r.URL.Path, "/pods/") {
-				http.ServeFile(w, r, filepath.Join(staticDir, "index.html"))
-				return
-			}
-			if !strings.HasPrefix(r.URL.Path, "/assets/") {
-				http.NotFound(w, r)
-				return
-			}
-			if _, err := os.Stat(filepath.Join(staticDir, filepath.Clean(r.URL.Path))); err != nil {
-				http.NotFound(w, r)
-				return
-			}
-			files.ServeHTTP(w, r)
-		})
+	if assets != nil {
+		mux.Handle("GET /", frontendHandler(assets))
 	}
+	return localBoundary(mux)
+}
+
+func localBoundary(next http.Handler, postPaths ...string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
@@ -112,11 +125,11 @@ func Handler(client *Client, staticDir string) http.Handler {
 				return
 			}
 		}
-		if r.Method != http.MethodGet {
+		if r.Method != http.MethodGet && !(r.Method == http.MethodPost && slices.Contains(postPaths, r.URL.Path)) {
 			w.Header().Set("Allow", "GET")
 			problem(w, 405, "Read-only explorer: only GET is supported")
 			return
 		}
-		mux.ServeHTTP(w, r)
+		next.ServeHTTP(w, r)
 	})
 }

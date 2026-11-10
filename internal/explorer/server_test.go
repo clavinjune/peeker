@@ -4,27 +4,21 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 func TestProductionHandlerServesAssetsAndKeepsAPIBoundary(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.Mkdir(filepath.Join(dir, "assets"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	for path, body := range map[string]string{"index.html": "<html>Peeker</html>", "assets/app.js": "console.log('Peeker')"} {
-		if err := os.WriteFile(filepath.Join(dir, path), []byte(body), 0600); err != nil {
-			t.Fatal(err)
-		}
+	assets := fstest.MapFS{
+		"index.html":    {Data: []byte("<html>Peeker</html>")},
+		"assets/app.js": {Data: []byte("console.log('Peeker')")},
 	}
 	client, err := NewClient("http://127.0.0.1:8001")
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := Handler(client, dir)
+	handler := Handler(client, assets)
 	for _, test := range []struct {
 		method, path, body string
 		status             int
@@ -32,6 +26,9 @@ func TestProductionHandlerServesAssetsAndKeepsAPIBoundary(t *testing.T) {
 		{"GET", "/", "Peeker", 200},
 		{"GET", "/pods/demo/web", "Peeker", 200},
 		{"GET", "/assets/app.js", "console.log", 200},
+		{"GET", "/assets/", "404", 404},
+		{"GET", "/assets/missing.js", "404", 404},
+		{"GET", "/assets/%2e%2e/index.html", "404", 404},
 		{"GET", "/api/health", "memory only", 200},
 		{"GET", "/api/secrets", "Unsupported", 404},
 		{"POST", "/api/pods", "Read-only", 405},
@@ -53,7 +50,7 @@ func TestAPIRejectsMutationsPassthroughAndInvalidIdentifiers(t *testing.T) {
 	}))
 	defer proxy.Close()
 	client, _ := NewClient(proxy.URL)
-	handler := Handler(client, "")
+	handler := Handler(client, nil)
 	tests := []struct {
 		method, path string
 		status       int
@@ -107,7 +104,7 @@ func TestLoopbackOriginAndCredentialRedaction(t *testing.T) {
 		}
 	}
 	client, _ := NewClient("http://127.0.0.1:8001")
-	handler := Handler(client, "")
+	handler := Handler(client, nil)
 	request := httptest.NewRequest("GET", "http://malicious.example/api/health", nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, request)
