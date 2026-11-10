@@ -13,7 +13,7 @@ export function useAPI<T>(url: string, refresh: number) {
   useEffect(() => {
     if (!generation) return;
     const abort = new AbortController(); setLoading(true); setError(''); setData(null);
-    fetch(url, { signal: abort.signal, headers: { 'X-Peeker-Context': generation } }).then(async response => {
+    fetch(`${url}${refresh > 0 ? `${url.includes('?') ? '&' : '?'}refresh=true` : ''}`, { signal: abort.signal, headers: { 'X-Peeker-Context': generation } }).then(async response => {
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || `Request failed: HTTP ${response.status}`);
       if (!abort.signal.aborted) setData(body as T);

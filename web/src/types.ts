@@ -21,9 +21,11 @@ export type Policy = {
   resource: Resource; selection: string; selector: unknown; notes: string[];
   rules: { field: string; action: string; peers: unknown; ports: unknown; restrictions?: Record<string, unknown> }[];
 };
-export type PodList = { pods: Pod[]; namespaces: string[]; states: State[] };
+export type InventorySummary = { total: number; critical: number; high: number; review: number; pending: number };
+export type PermissionsReport = { serviceAccount: Resource; identity: string; status: string; grants: { binding: Resource; role: Resource; scope: string; rule: { apiGroups: string[]; resources: string[]; verbs: string[]; resourceNames: string[]; nonResourceURLs: string[] }; evidence: Evidence[] }[]; gaps: Evidence[] };
+export type PodList = { pods: Pod[]; states: State[]; snapshot: string; status: 'loading' | 'assessing' | 'complete' | 'error'; message?: string; capturedAt: string; expiresAt: string; summary: InventorySummary; total: number; hidden: number; offset: number; nextOffset: number; hasMore: boolean };
 export type Detail = {
-  pod: Pod; capturedAt: string; states: State[]; security: SecurityReport;
+  pod: Pod; capturedAt: string; states: State[]; security: SecurityReport; permissions: PermissionsReport;
   policies: { ingress: Direction; egress: Direction; policies: Policy[]; graph: GraphData };
   routing: { relationships: { route: Resource; service: Resource; status: string; description: string; evidence: Evidence[] }[]; graph: GraphData };
 };

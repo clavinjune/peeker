@@ -24,5 +24,5 @@ export function useHidden() {
       setWarning('');
     } catch { setWarning('Hiding applies to this view, but could not be saved in this browser.'); }
   };
-  return { has: (pod: Pod) => keys.has(hiddenKey(pod)), toggle, warning, persistent: !!storageKey };
+  return { keys: [...keys], has: (pod: Pod) => keys.has(hiddenKey(pod)), toggle, warning, persistent: !!storageKey };
 }

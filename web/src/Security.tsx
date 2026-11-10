@@ -1,22 +1,22 @@
 import { Accordion, Badge, Group, Paper, SimpleGrid, Stack, Text, Tooltip } from '@mantine/core';
 import { EvidenceList } from './Graph';
 import { resourceName } from './types';
-import type { Pod, Risk, SecurityReport } from './types';
+import type { InventorySummary, Risk, SecurityReport } from './types';
 
-const colors: Record<string, string> = { critical: 'red', high: 'orange', medium: 'yellow', low: 'blue', none: 'teal', unknown: 'gray' };
+const colors: Record<string, string> = { critical: 'red', high: 'orange', medium: 'yellow', low: 'blue', none: 'teal', unknown: 'gray', pending: 'gray' };
 
 export function RiskBadge({ risk }: { risk: Risk }) {
-  const score = risk.level === 'unknown' ? '—' : `${risk.unknown > 0 ? '≥' : ''}${risk.score}`;
+  const score = risk.level === 'unknown' || risk.level === 'pending' ? '—' : `${risk.unknown > 0 ? '≥' : ''}${risk.score}`;
   const label = risk.level === 'none' ? 'No findings' : risk.level === 'unknown' ? 'Unrated' : risk.level;
   return <Tooltip multiline w={280} label="Configuration risk, 0–100. Higher is more severe. Partial scores are a lower bound; no findings does not guarantee security."><Badge variant="light" color={colors[risk.level]} size="lg" className="risk-badge">{score} · {label}</Badge></Tooltip>;
 }
 
-export function RiskOverview({ pods }: { pods?: Pod[] }) {
+export function RiskOverview({ summary }: { summary?: InventorySummary }) {
   const stats = [
-    ['Pods', pods?.length, 'dark'],
-    ['Critical', pods?.filter(p => p.risk.level === 'critical').length, 'red'],
-    ['High', pods?.filter(p => p.risk.level === 'high').length, 'orange'],
-    ['Need review', pods?.filter(p => p.risk.unknown > 0).length, 'gray'],
+    ['Pods', summary?.total, 'dark'],
+    ['Critical', summary?.critical, 'red'],
+    ['High', summary?.high, 'orange'],
+    ['Need review', summary?.review, 'gray'],
   ] as const;
   return <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm">{stats.map(([label, count, color]) => <Paper key={label} withBorder p="sm"><Group justify="space-between"><Text size="sm" c="dimmed">{label}</Text><Text fw={700} size="xl" c={color}>{count ?? '—'}</Text></Group></Paper>)}</SimpleGrid>;
 }

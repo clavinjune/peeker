@@ -13,3 +13,13 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .inventory-name { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .risk-badge { font-variant-numeric: tabular-nums; }
 .coverage-gap { background: #fff9e8; border-radius: 8px; padding: 0 10px; }
+.inventory-viewport { overflow: auto; max-height: 600px; }
+.inventory-table { table-layout: fixed; min-width: 1050px; }
+.inventory-table thead { position: sticky; top: 0; background: white; z-index: 1; }
+.inventory-table th:nth-child(1) { width: 17%; }
+.inventory-table th:nth-child(2) { width: 28%; }
+.inventory-table th:nth-child(3) { width: 14%; }
+.inventory-table th:nth-child(4) { width: 25%; }
+.inventory-table th:nth-child(5) { width: 6%; }
+.inventory-table th:nth-child(6) { width: 10%; }
+.inventory-row { height: 80px; }
