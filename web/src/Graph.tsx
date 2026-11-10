@@ -3,7 +3,7 @@ import { Badge, Button, Drawer, Group, Paper, Stack, Text, Title } from '@mantin
 import { resourceName } from './types';
 import type { Evidence, GraphData } from './types';
 
-const colors: Record<string, string> = { allowed: '#087f5b', denied: '#c92a2a', unrestricted: '#4263eb', unknown: '#a66a00' };
+const colors: Record<string, string> = { allowed: '#087f5b', denied: '#c92a2a', unrestricted: '#4263eb', unknown: '#a66a00', observed: '#087f5b' };
 
 export function EvidenceList({ evidence }: { evidence: Evidence[] }) {
   return <Stack gap="sm">{evidence.length ? evidence.map((e, i) => <Paper key={i} withBorder p="md">
@@ -12,7 +12,7 @@ export function EvidenceList({ evidence }: { evidence: Evidence[] }) {
   </Paper>) : <Text c="dimmed">Inventory unavailable; no resource-backed conclusion is possible.</Text>}</Stack>;
 }
 
-export function Graph({ data, center, topology = false }: { data: GraphData; center: string; topology?: boolean }) {
+export function Graph({ data, center, topology = false, traffic = false }: { data: GraphData; center: string; topology?: boolean; traffic?: boolean }) {
   const marker = useId().replaceAll(':', '');
   const [selection, setSelection] = useState<{ title: string; evidence: Evidence[] } | null>(null);
   const nodes = data.nodes.slice(0, 22);
@@ -36,11 +36,11 @@ export function Graph({ data, center, topology = false }: { data: GraphData; cen
   }));
   return <>
     <Group gap="sm" mb="md">
-      {!topology && <><Badge color="teal" variant="light">Allow rule</Badge><Badge color="red" variant="light">Deny rule / isolated</Badge><Badge color="indigo" variant="light">Not isolated by KNP</Badge></>}
-      <Badge color="yellow" variant="light">{topology ? 'Configured relationship' : 'Unknown / partial'}</Badge>
+      {!topology && !traffic && <><Badge color="teal" variant="light">Allow rule</Badge><Badge color="red" variant="light">Deny rule / isolated</Badge><Badge color="indigo" variant="light">Not isolated by KNP</Badge></>}
+      <Badge color={traffic ? 'teal' : 'yellow'} variant="light">{traffic ? 'Observed HTTP traffic' : topology ? 'Configured relationship' : 'Unknown / partial'}</Badge>
     </Group>
     <div className="graph-canvas">
-      <svg viewBox={`0 0 ${width} ${height}`} style={{ minWidth: Math.min(width, 1050) }} aria-label={topology ? 'Configuration-derived topology' : 'Network security graph'}>
+      <svg viewBox={`0 0 ${width} ${height}`} style={{ minWidth: Math.min(width, 1050) }} aria-label={traffic ? 'Observed pod traffic' : topology ? 'Configuration-derived topology' : 'Network security graph'}>
         <defs>{Object.entries(colors).map(([key, color]) => <marker key={key} id={`${marker}-${key}`} markerWidth="9" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 9 3.5, 0 7" fill={color} /></marker>)}</defs>
         {edges.map(e => {
           const from = positions.get(e.from)!; const to = positions.get(e.to)!;
@@ -65,7 +65,7 @@ export function Graph({ data, center, topology = false }: { data: GraphData; cen
       </svg>
     </div>
     {nodes.length < data.nodes.length && <Text size="sm" c="dimmed">Showing {nodes.length} of {data.nodes.length} nodes. All relationships are available below.</Text>}
-    <Text size="xs" c="dimmed" mt="sm">Select a node or edge to inspect its resource evidence. Arrows describe configuration, not measured traffic or proven packet delivery.</Text>
+    <Text size="xs" c="dimmed" mt="sm">{traffic ? 'Select an edge to inspect request counts, errors and mean duration. Arrows follow the request direction observed by this sidecar.' : 'Select a node or edge to inspect its resource evidence. Arrows describe configuration, not measured traffic or proven packet delivery.'}</Text>
     <details className="edge-list"><summary>All {data.edges.length} relationships and evidence</summary><Stack gap="xs" mt="sm">{data.edges.map(e => <Button key={e.id} justify="start" variant="subtle" color={e.status === 'denied' ? 'red' : 'gray'} onClick={() => setSelection({ title: e.label, evidence: e.evidence ?? [] })}>{e.status} · {e.label} · {e.evidence?.[0]?.resource.name ?? 'inventory unavailable'}</Button>)}</Stack></details>
     <Drawer opened={selection !== null} onClose={() => setSelection(null)} position="right" size="lg" title="Resource evidence">
       <Title order={4} mb="lg">{selection?.title}</Title><EvidenceList evidence={selection?.evidence ?? []} />

@@ -10,3 +10,6 @@ body { margin: 0; background: #f6f8fc; color: #182235; }
 .edge-list { margin-top: 16px; }
 summary { cursor: pointer; font-size: 13px; color: #526278; padding: 10px 0; }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.inventory-name { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.risk-badge { font-variant-numeric: tabular-nums; }
+.coverage-gap { background: #fff9e8; border-radius: 8px; padding: 0 10px; }
