@@ -1,0 +1,7 @@
+.tools/
+.local/
+web/node_modules/
+web/dist/
+bin/
+.DS_Store
+.ripwire_quality_baseline

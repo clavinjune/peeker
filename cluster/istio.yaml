@@ -1,0 +1,27 @@
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+metadata:
+  name: peeker
+  namespace: istio-system
+spec:
+  profile: default
+  tag: 1.32.0
+  meshConfig:
+    enableTracing: false
+  components:
+    pilot:
+      k8s:
+        overlays:
+          - kind: Deployment
+            name: istiod
+            patches:
+              - path: spec.template.spec.hostNetwork
+                value: true
+              - path: spec.template.spec.dnsPolicy
+                value: ClusterFirstWithHostNet
+    ingressGateways:
+      - name: istio-ingressgateway
+        enabled: true
+        k8s:
+          service:
+            type: ClusterIP

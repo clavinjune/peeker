@@ -1,0 +1,12 @@
+body { margin: 0; background: #f6f8fc; color: #182235; }
+.brand-mark { display: grid; place-items: center; width: 34px; height: 34px; background: #4263eb; color: white; border-radius: 10px; font-size: 28px; font-weight: 800; }
+.eyebrow { color: #667085; font-size: 11px; font-weight: 650; letter-spacing: 1.4px; margin-bottom: 8px; }
+.pod-title { overflow-wrap: anywhere; }
+.table-panel { overflow: hidden; }
+.graph-canvas { overflow-x: auto; background: radial-gradient(#dfe4ed 1px, transparent 1px); background-size: 18px 18px; border: 1px solid #e9edf5; border-radius: 10px; }
+.graph-canvas svg { display: block; width: 100%; }
+.graph-canvas [role=button] { cursor: pointer; outline-offset: 3px; }
+.graph-canvas [role=button]:hover rect { stroke: #4263eb; stroke-width: 2; }
+.edge-list { margin-top: 16px; }
+summary { cursor: pointer; font-size: 13px; color: #526278; padding: 10px 0; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; }

@@ -1,0 +1,25 @@
+auth:
+  strategy: anonymous
+deployment:
+  view_only_mode: true
+  service_type: ClusterIP
+  ingress:
+    enabled: false
+  network_policy:
+    enabled: true
+external_services:
+  prometheus:
+    enabled: false
+  grafana:
+    enabled: false
+  tracing:
+    enabled: false
+  custom_dashboards:
+    enabled: false
+server:
+  web_root: /kiali
+  observability:
+    metrics:
+      enabled: false
+ai:
+  enabled: false

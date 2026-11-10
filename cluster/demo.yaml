@@ -1,0 +1,124 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: peeker-demo
+  labels:
+    app.kubernetes.io/part-of: peeker-demo
+    purpose: policy-demo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: peeker-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo-web
+  template:
+    metadata:
+      labels:
+        app: demo-web
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: web
+          image: nginxinc/nginx-unprivileged:1.30.0-alpine
+          ports:
+            - name: http
+              containerPort: 8080
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: peeker-demo
+spec:
+  selector:
+    app: demo-web
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: isolate-web
+  namespace: peeker-demo
+spec:
+  podSelector:
+    matchLabels:
+      app: demo-web
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress: []
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-demo-clients
+  namespace: peeker-demo
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values: [demo-web]
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              purpose: policy-demo
+          podSelector:
+            matchLabels:
+              role: client
+      ports:
+        - port: http
+          protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: deny-world-egress
+  namespace: peeker-demo
+spec:
+  endpointSelector:
+    matchLabels:
+      app: demo-web
+  egressDeny:
+    - toEntities: [world]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: demo
+  namespace: peeker-demo
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: peeker-demo.localhost
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  name: http

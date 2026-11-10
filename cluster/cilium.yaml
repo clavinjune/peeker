@@ -1,0 +1,34 @@
+kubeProxyReplacement: false
+socketLB:
+  hostNamespaceOnly: true
+cni:
+  exclusive: false
+  binPath: /opt/cni/bin
+  confPath: /etc/cni/net.d
+ipam:
+  mode: cluster-pool
+  operator:
+    clusterPoolIPv4PodCIDRList:
+      - 10.44.0.0/16
+routingMode: tunnel
+tunnelProtocol: vxlan
+tunnelPort: 8473
+bpf:
+  hostLegacyRouting: true
+operator:
+  replicas: 1
+  unmanagedPodWatcher:
+    restart: false
+  prometheus:
+    enabled: false
+prometheus:
+  enabled: false
+hubble:
+  enabled: false
+  relay:
+    enabled: false
+  ui:
+    enabled: false
+envoy:
+  prometheus:
+    enabled: false

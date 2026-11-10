@@ -1,0 +1,12 @@
+provision:
+  - mode: system
+    script: |
+      #!/bin/sh
+      set -eu
+      mountpoint -q /sys/fs/bpf || mount -t bpf bpffs /sys/fs/bpf
+      mount --make-shared /sys/fs/bpf
+      mkdir -p /run/cilium/cgroupv2 /var/run/netns
+      mountpoint -q /run/cilium/cgroupv2 || mount -t cgroup2 none /run/cilium/cgroupv2
+      mount --make-shared /run/cilium/cgroupv2
+      mountpoint -q /var/run/netns || mount --bind /var/run/netns /var/run/netns
+      mount --make-shared /var/run/netns
