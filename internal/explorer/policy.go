@@ -76,9 +76,10 @@ func matches(selector any, values Object) (bool, error) {
 }
 
 type Direction struct {
-	Status   string     `json:"status"`
-	Summary  string     `json:"summary"`
-	Evidence []Evidence `json:"evidence"`
+	Status    string     `json:"status"`
+	Summary   string     `json:"summary"`
+	Evidence  []Evidence `json:"evidence"`
+	OpenRules []Evidence `json:"-"`
 }
 type PolicyView struct {
 	Resource  Ref        `json:"resource"`
@@ -321,6 +322,7 @@ func evaluateDirection(direction string, pod Object, s Snapshot, g *Graph, id st
 		in, out, err := policyTypes(spec)
 		if err != nil {
 			uncertain = true
+			d.Evidence = append(d.Evidence, Evidence{ref(p), "spec.policyTypes", err.Error()})
 			continue
 		}
 		if (direction == "ingress" && !in) || (direction == "egress" && !out) {
@@ -351,6 +353,7 @@ func evaluateDirection(direction string, pod Object, s Snapshot, g *Graph, id st
 				peerID := g.node(fmt.Sprintf("np:%s:%s:%d:%d", uid(p), direction, i, j), label, "peer", nil)
 				field := fmt.Sprintf("spec.%s[%d]", direction, i)
 				evidence := Evidence{ref(p), field, description + "; " + ports + ". Kubernetes NetworkPolicy allowance only; other enforcement is not evaluated here."}
+				d.recordOpenRule(rule, obj(v), state, evidence)
 				if direction == "ingress" {
 					g.edge(peerID, id, state, ports, evidence)
 				} else {
@@ -391,26 +394,38 @@ func directionNode(direction, id string, g *Graph, d Direction) Direction {
 
 func ciliumLabels(pod Object, s Snapshot) Object {
 	result := Object{"k8s:io.kubernetes.pod.namespace": namespace(pod), "io.kubernetes.pod.namespace": namespace(pod)}
+	sa := text(at(pod, "spec", "serviceAccountName"))
+	if sa == "" {
+		sa = "default"
+	}
 	for k, v := range labels(pod) {
+		if strings.HasPrefix(k, "io.cilium.k8s.namespace.labels.") {
+			continue
+		}
 		result[k] = v
 		result["k8s:"+k] = v
 		result["any:"+k] = v
 	}
+	result["k8s:io.cilium.k8s.policy.serviceaccount"], result["io.cilium.k8s.policy.serviceaccount"], result["any:io.cilium.k8s.policy.serviceaccount"] = sa, sa, sa
+	result["k8s:io.kubernetes.pod.namespace"], result["io.kubernetes.pod.namespace"], result["any:io.kubernetes.pod.namespace"] = namespace(pod), namespace(pod), namespace(pod)
 	if n, ok := s.find("namespaces", "", namespace(pod)); ok {
 		for k, v := range labels(n) {
 			result["k8s:io.cilium.k8s.namespace.labels."+k] = v
 			result["io.cilium.k8s.namespace.labels."+k] = v
+			result["any:io.cilium.k8s.namespace.labels."+k] = v
 		}
 	}
 	return result
 }
-func addCilium(pod Object, s Snapshot, a *PolicyAnalysis) {
-	type selectedRule struct {
-		policy    Object
-		spec      Object
-		field     string
-		selection string
-	}
+
+type selectedRule struct {
+	policy    Object
+	spec      Object
+	field     string
+	selection string
+}
+
+func selectedCiliumRules(pod Object, s Snapshot) []selectedRule {
 	selected := []selectedRule{}
 	for _, key := range []string{"ciliumnetworkpolicies", "ciliumclusterwidenetworkpolicies"} {
 		for _, p := range s.items(key) {
@@ -431,7 +446,7 @@ func addCilium(pod Object, s Snapshot, a *PolicyAnalysis) {
 				if _, host := spec["nodeSelector"]; host {
 					continue
 				}
-				ok, err := matches(spec["endpointSelector"], ciliumLabels(pod, s))
+				ok, err := ciliumSelection(spec["endpointSelector"], pod, s)
 				if !ok && err == nil {
 					continue
 				}
@@ -443,6 +458,11 @@ func addCilium(pod Object, s Snapshot, a *PolicyAnalysis) {
 			}
 		}
 	}
+	return selected
+}
+
+func addCilium(pod Object, s Snapshot, a *PolicyAnalysis) {
+	selected := selectedCiliumRules(pod, s)
 	denyPresent := map[string]bool{}
 	for _, r := range selected {
 		for _, d := range []string{"ingress", "egress"} {
@@ -453,6 +473,7 @@ func addCilium(pod Object, s Snapshot, a *PolicyAnalysis) {
 	}
 	for _, r := range selected {
 		view := PolicyView{ref(r.policy), r.selection, r.spec["endpointSelector"], []RuleView{}, []string{"Partial Cilium rule inventory, not a complete effective-policy verdict. Deny rules take precedence over Cilium and Kubernetes allow rules. Identity resolution, node policies, DNS/FQDN state, services, L7, authentication and enforcement mode require runtime evaluation."}}
+		view.Notes = append(view.Notes, "Default-deny configuration: "+jsonText(r.spec["enableDefaultDeny"])+"; omitted directions default to enabled only when that direction has allow or deny rules. Any selecting policy can enable default-deny.")
 		for _, field := range []string{"ingress", "egress", "ingressDeny", "egressDeny"} {
 			direction := strings.TrimSuffix(field, "Deny")
 			action := "allow"

@@ -202,14 +202,15 @@ func ownership(pod Object, s Snapshot) OwnerChain {
 
 type PodView struct {
 	Ref
-	Labels     Object     `json:"labels"`
-	Node       string     `json:"node"`
-	Phase      string     `json:"phase"`
-	IP         string     `json:"ip"`
-	Sidecar    bool       `json:"sidecar"`
-	Ready      int        `json:"ready"`
-	Containers int        `json:"containers"`
-	Ownership  OwnerChain `json:"ownership"`
+	Labels     Object      `json:"labels"`
+	Node       string      `json:"node"`
+	Phase      string      `json:"phase"`
+	IP         string      `json:"ip"`
+	Sidecar    bool        `json:"sidecar"`
+	Ready      int         `json:"ready"`
+	Containers int         `json:"containers"`
+	Ownership  OwnerChain  `json:"ownership"`
+	Risk       RiskSummary `json:"risk"`
 }
 
 func podView(p Object, s Snapshot) PodView {

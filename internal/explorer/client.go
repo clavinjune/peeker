@@ -23,6 +23,11 @@ type resource struct {
 var resources = []resource{
 	{"namespaces", "", "namespaces", "Namespace", []string{"v1"}, false},
 	{"pods", "", "pods", "Pod", []string{"v1"}, true},
+	{"serviceaccounts", "", "serviceaccounts", "ServiceAccount", []string{"v1"}, true},
+	{"roles", "rbac.authorization.k8s.io", "roles", "Role", []string{"v1"}, true},
+	{"rolebindings", "rbac.authorization.k8s.io", "rolebindings", "RoleBinding", []string{"v1"}, true},
+	{"clusterroles", "rbac.authorization.k8s.io", "clusterroles", "ClusterRole", []string{"v1"}, false},
+	{"clusterrolebindings", "rbac.authorization.k8s.io", "clusterrolebindings", "ClusterRoleBinding", []string{"v1"}, false},
 	{"services", "", "services", "Service", []string{"v1"}, true},
 	{"replicationcontrollers", "", "replicationcontrollers", "ReplicationController", []string{"v1"}, true},
 	{"replicasets", "apps", "replicasets", "ReplicaSet", []string{"v1"}, true},
@@ -46,8 +51,9 @@ var resources = []resource{
 }
 
 type Client struct {
-	base string
-	http *http.Client
+	base       string
+	http       *http.Client
+	Assessment AssessmentOptions
 }
 
 func NewClient(raw string) (*Client, error) {
@@ -59,7 +65,7 @@ func NewClient(raw string) (*Client, error) {
 	if u.Scheme != "http" || ip == nil || !ip.IsLoopback() || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
 		return nil, errors.New("proxy URL must be an HTTP loopback IP origin, for example http://127.0.0.1:8001")
 	}
-	return &Client{strings.TrimRight(raw, "/"), &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{Proxy: nil}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+	return &Client{base: strings.TrimRight(raw, "/"), http: &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{Proxy: nil}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, Assessment: AssessmentOptions{ExpectIstio: true}}, nil
 }
 
 type readError struct {
@@ -75,7 +81,7 @@ func (c *Client) get(ctx context.Context, path string) (Object, error) {
 	}
 	response, err := c.http.Do(req)
 	if err != nil {
-		return nil, readError{0, "Cannot reach kubectl proxy. Start scripts/proxy.sh and check rancher-desktop connectivity."}
+		return nil, readError{0, "Cannot reach kubectl proxy. Reconnect the selected context or check your external proxy."}
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
@@ -178,7 +184,7 @@ func (c *Client) snapshot(ctx context.Context, ns string, details bool) Snapshot
 	var wg sync.WaitGroup
 	semaphore := make(chan struct{}, 6)
 	for _, r := range resources {
-		if !details && r.key != "pods" && r.key != "namespaces" {
+		if !details && !inventoryCollections[r.key] {
 			if _, ok := ownerCollections[r.kind]; !ok {
 				continue
 			}
@@ -188,7 +194,11 @@ func (c *Client) snapshot(ctx context.Context, ns string, details bool) Snapshot
 			defer wg.Done()
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
-			collection := c.list(ctx, r, ns)
+			resourceNS := ns
+			if rbacCollections[r.key] {
+				resourceNS = ""
+			}
+			collection := c.list(ctx, r, resourceNS)
 			mu.Lock()
 			s[r.key] = collection
 			mu.Unlock()
@@ -197,3 +207,5 @@ func (c *Client) snapshot(ctx context.Context, ns string, details bool) Snapshot
 	wg.Wait()
 	return s
 }
+
+var inventoryCollections = map[string]bool{"pods": true, "namespaces": true, "serviceaccounts": true, "roles": true, "rolebindings": true, "clusterroles": true, "clusterrolebindings": true, "networkpolicies": true, "ciliumnetworkpolicies": true, "ciliumclusterwidenetworkpolicies": true}
