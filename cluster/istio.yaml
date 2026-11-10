@@ -8,6 +8,20 @@ spec:
   tag: 1.32.0
   meshConfig:
     enableTracing: false
+    extensionProviders:
+      - name: peeker-access-log
+        envoyFileAccessLog:
+          path: /dev/stdout
+          logFormat:
+            labels:
+              start_time: "%START_TIME%"
+              upstream_cluster: "%UPSTREAM_CLUSTER%"
+              upstream_host: "%UPSTREAM_HOST%"
+              downstream_direct_remote_address: "%DOWNSTREAM_DIRECT_REMOTE_ADDRESS%"
+              protocol: "%PROTOCOL%"
+              response_code: "%RESPONSE_CODE%"
+              response_flags: "%RESPONSE_FLAGS%"
+              duration: "%DURATION%"
   components:
     pilot:
       k8s:

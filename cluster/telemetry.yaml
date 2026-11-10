@@ -1,0 +1,9 @@
+apiVersion: telemetry.istio.io/v1
+kind: Telemetry
+metadata:
+  name: peeker-access-log
+  namespace: peeker-bookinfo
+spec:
+  accessLogging:
+    - providers:
+        - name: peeker-access-log

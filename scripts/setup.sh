@@ -11,6 +11,7 @@ kubectl --context rancher-desktop wait --for=condition=Ready nodes --all --timeo
 .tools/istio/bin/istioctl install --context rancher-desktop --manifests .tools/istio/manifests -f cluster/istio.yaml --skip-confirmation
 kubectl --context rancher-desktop apply -f cluster/namespaces.yaml
 kubectl --context rancher-desktop apply -f cluster/reader.yaml
+kubectl --context rancher-desktop apply -f cluster/telemetry.yaml
 kubectl --context rancher-desktop -n peeker-bookinfo apply -f .tools/istio/samples/bookinfo/platform/kube/bookinfo.yaml
 kubectl --context rancher-desktop -n peeker-bookinfo apply -f .tools/istio/samples/bookinfo/networking/bookinfo-gateway.yaml
 kubectl --context rancher-desktop -n peeker-bookinfo apply -f .tools/istio/samples/bookinfo/networking/destination-rule-all.yaml
