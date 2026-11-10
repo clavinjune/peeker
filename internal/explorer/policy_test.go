@@ -14,7 +14,9 @@ func fixture(t *testing.T, raw string) Object {
 	}
 	return o
 }
-func available(items ...Object) Collection { return Collection{items, State{Status: "available"}} }
+func available(items ...Object) Collection {
+	return Collection{Items: items, State: State{Status: "available"}}
+}
 func samplePod(t *testing.T) Object {
 	return fixture(t, `{"kind":"Pod","metadata":{"name":"web","namespace":"demo","uid":"pod-1","labels":{"app":"web","version":"v1"}}}`)
 }

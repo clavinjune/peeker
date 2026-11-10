@@ -51,8 +51,14 @@ var resources = []resource{
 }
 
 type Client struct {
-	base       string
 	http       *http.Client
+	cancel     context.CancelFunc
+	cache      map[string]*collectionRead
+	reads      chan struct{}
+	ctx        context.Context
+	base       string
+	cacheMu    sync.Mutex
+	pending    int
 	Assessment AssessmentOptions
 }
 
@@ -65,7 +71,8 @@ func NewClient(raw string) (*Client, error) {
 	if u.Scheme != "http" || ip == nil || !ip.IsLoopback() || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
 		return nil, errors.New("proxy URL must be an HTTP loopback IP origin, for example http://127.0.0.1:8001")
 	}
-	return &Client{base: strings.TrimRight(raw, "/"), http: &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{Proxy: nil}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, Assessment: AssessmentOptions{ExpectIstio: true}}, nil
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Client{base: strings.TrimRight(raw, "/"), http: &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{Proxy: nil}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, Assessment: AssessmentOptions{ExpectIstio: true}, ctx: ctx, cancel: cancel, cache: map[string]*collectionRead{}, reads: make(chan struct{}, 6)}, nil
 }
 
 type readError struct {
@@ -140,7 +147,7 @@ func (c *Client) list(ctx context.Context, r resource, ns string) Collection {
 		base = ""
 	}
 	if base == "" {
-		return Collection{[]Object{}, State{r.key, "missing-api", "API not installed or no supported version served"}}
+		return Collection{Items: []Object{}, State: State{r.key, "missing-api", "API not installed or no supported version served"}}
 	}
 	if ns != "" && r.namespaced {
 		base += "/namespaces/" + ns
@@ -170,10 +177,13 @@ func (c *Client) list(ctx context.Context, r resource, ns string) Collection {
 			o["apiVersion"] = strings.Split(text(o["apiVersion"]), "/namespaces/")[0]
 			o["apiVersion"] = strings.TrimSuffix(text(o["apiVersion"]), "/"+r.plural)
 			items = append(items, o)
+			if len(items) > 20000 {
+				return failed(r.key, errors.New("List exceeds 20,000 resources; results not treated as complete"), false)
+			}
 		}
 		continuation = text(at(result, "metadata", "continue"))
 		if continuation == "" {
-			return Collection{items, State{r.key, "available", ""}}
+			return Collection{Items: items, State: State{r.key, "available", ""}}
 		}
 	}
 	return failed(r.key, errors.New("List exceeds 20,000 resources; results not treated as complete"), false)
@@ -182,7 +192,6 @@ func (c *Client) snapshot(ctx context.Context, ns string, details bool) Snapshot
 	s := Snapshot{}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	semaphore := make(chan struct{}, 6)
 	for _, r := range resources {
 		if !details && !inventoryCollections[r.key] {
 			if _, ok := ownerCollections[r.kind]; !ok {
@@ -192,20 +201,18 @@ func (c *Client) snapshot(ctx context.Context, ns string, details bool) Snapshot
 		wg.Add(1)
 		go func(r resource) {
 			defer wg.Done()
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
 			resourceNS := ns
 			if rbacCollections[r.key] {
 				resourceNS = ""
 			}
-			collection := c.list(ctx, r, resourceNS)
+			collection := c.cachedList(ctx, r, resourceNS)
 			mu.Lock()
 			s[r.key] = collection
 			mu.Unlock()
 		}(r)
 	}
 	wg.Wait()
-	return s
+	return indexedSnapshot(s)
 }
 
 var inventoryCollections = map[string]bool{"pods": true, "namespaces": true, "serviceaccounts": true, "roles": true, "rolebindings": true, "clusterroles": true, "clusterrolebindings": true, "networkpolicies": true, "ciliumnetworkpolicies": true, "ciliumclusterwidenetworkpolicies": true}

@@ -166,7 +166,10 @@ func TestRiskScoreBandsAndInventoryOrdering(t *testing.T) {
 	obj(obj(arr(at(unsafe, "spec", "containers"))[0])["securityContext"])["privileged"] = true
 	s := securitySnapshot()
 	s["pods"] = available(safe, unsafe)
-	views := inventoryPods(s, "")
+	job := &inventoryJob{}
+	job.prepare(s)
+	job.assess(context.Background(), s, AssessmentOptions{ExpectIstio: true})
+	views := job.page(inventoryQuery{Sort: "risk", Limit: 100}).Pods
 	if views[0].Name != "unsafe" || views[0].Risk.Level != "critical" || views[1].Risk.Score != 0 {
 		t.Fatalf("inventory risk ordering: %+v", views)
 	}

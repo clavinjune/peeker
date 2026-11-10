@@ -25,8 +25,11 @@ func TestMCPClientReadToolsAndGeneration(t *testing.T) {
 		}
 		switch r.URL.Path {
 		case "/api/pods":
-			pods := []PodView{{Ref: Ref{Kind: "Pod", Namespace: "demo", Name: "first"}}, {Ref: Ref{Kind: "Pod", Namespace: "demo", Name: "second"}}}
-			writeJSON(w, 200, map[string]any{"pods": pods, "namespaces": []string{"demo"}, "states": []State{}})
+			if r.URL.Query().Get("limit") != "1" {
+				t.Error("MCP did not pass the backend page bounds")
+			}
+			pods := []PodView{{Ref: Ref{Kind: "Pod", Namespace: "demo", Name: "first"}}}
+			writeJSON(w, 200, map[string]any{"pods": pods, "snapshot": "fixture", "status": "complete", "hasMore": true, "nextOffset": 1, "states": []State{}})
 		case "/api/pods/demo/first":
 			writeJSON(w, 200, map[string]string{"evidence": "fixture"})
 		case "/api/capabilities":

@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 )
@@ -47,27 +46,10 @@ func frontendHandler(assets fs.FS) http.Handler {
 func Handler(client *Client, assets fs.FS) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/pods/{namespace}/{name}/traffic", trafficHandler(client))
-	mux.HandleFunc("GET /api/pods", func(w http.ResponseWriter, r *http.Request) {
-		ns := r.URL.Query().Get("namespace")
-		if ns != "" && !validName(ns, true) {
-			problem(w, 400, "Invalid namespace identifier")
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-		defer cancel()
-		s := client.snapshot(ctx, ns, false)
-		if !s.available("pods") {
-			writeJSON(w, 502, map[string]any{"error": s["pods"].State.Message, "states": s.states()})
-			return
-		}
-		pods := inventoryPods(s, r.URL.Query().Get("name"), client.Assessment)
-		names := []string{}
-		for _, n := range s.items("namespaces") {
-			names = append(names, name(n))
-		}
-		sort.Strings(names)
-		writeJSON(w, 200, map[string]any{"pods": pods, "namespaces": names, "states": s.states()})
-	})
+	inventory := inventoryHandler(client)
+	mux.HandleFunc("GET /api/namespaces", namespaceHandler(client))
+	mux.HandleFunc("GET /api/pods", inventory)
+	mux.HandleFunc("POST /api/pods/query", inventory)
 	mux.HandleFunc("GET /api/pods/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) {
 		ns, n := r.PathValue("namespace"), r.PathValue("name")
 		if !validName(ns, true) || !validName(n, false) {
@@ -76,6 +58,9 @@ func Handler(client *Client, assets fs.FS) http.Handler {
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
 		defer cancel()
+		if r.URL.Query().Get("refresh") == "true" {
+			client.invalidate()
+		}
 		s := client.snapshot(ctx, "", true)
 		if !s.available("pods") {
 			writeJSON(w, 502, map[string]any{"error": s["pods"].State.Message, "states": s.states()})
@@ -89,7 +74,7 @@ func Handler(client *Client, assets fs.FS) http.Handler {
 		security := assessPod(p, s, client.Assessment)
 		view := podView(p, s)
 		view.Risk = security.Risk
-		writeJSON(w, 200, map[string]any{"pod": view, "security": security, "policies": networkPolicies(p, s), "routing": routing(p, s), "states": s.states(), "capturedAt": time.Now().UTC().Format(time.RFC3339)})
+		writeJSON(w, 200, map[string]any{"pod": view, "security": security, "permissions": podPermissions(p, s), "policies": networkPolicies(p, s), "routing": routing(p, s), "states": s.states(), "capturedAt": time.Now().UTC().Format(time.RFC3339)})
 	})
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]string{"status": "running", "storage": "memory only"})
@@ -102,7 +87,7 @@ func Handler(client *Client, assets fs.FS) http.Handler {
 	if assets != nil {
 		mux.Handle("GET /", frontendHandler(assets))
 	}
-	return localBoundary(mux)
+	return localBoundary(mux, "/api/pods/query")
 }
 
 func localBoundary(next http.Handler, postPaths ...string) http.Handler {

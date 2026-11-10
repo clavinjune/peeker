@@ -75,8 +75,9 @@ type State struct {
 	Message  string `json:"message,omitempty"`
 }
 type Collection struct {
-	Items []Object
+	index *resourceIndex
 	State State
+	Items []Object
 }
 type Snapshot map[string]Collection
 
@@ -91,6 +92,10 @@ func (s Snapshot) states() []State {
 	return out
 }
 func (s Snapshot) find(key, ns, n string) (Object, bool) {
+	if index := s[key].index; index != nil {
+		o, found := index.names[ns+"/"+n]
+		return o, found
+	}
 	for _, o := range s.items(key) {
 		if namespace(o) == ns && name(o) == n {
 			return o, true

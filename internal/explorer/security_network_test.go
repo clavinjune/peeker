@@ -1,6 +1,7 @@
 package explorer
 
 import (
+	"context"
 	"reflect"
 	"testing"
 )
@@ -40,7 +41,10 @@ func TestNetworkBaselineIsolationAndAdditiveAllowAll(t *testing.T) {
 				}
 			}
 			s["pods"] = available(pod)
-			if !reflect.DeepEqual(inventoryPods(s, "")[0].Risk, report.Risk) {
+			job := &inventoryJob{}
+			job.prepare(s)
+			job.assess(context.Background(), s, AssessmentOptions{ExpectIstio: true})
+			if !reflect.DeepEqual(job.page(inventoryQuery{Limit: 100}).Pods[0].Risk, report.Risk) {
 				t.Fatal("inventory/detail score mismatch")
 			}
 		})

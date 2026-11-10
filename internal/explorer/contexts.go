@@ -83,7 +83,7 @@ func (m *ContextManager) disconnectLocked() {
 	if m.session != nil {
 		m.session.cancel()
 		m.session.process.stop()
-		m.session.process.client.http.CloseIdleConnections()
+		m.session.process.client.Close()
 		m.session = nil
 	}
 }
@@ -127,6 +127,7 @@ func (m *ContextManager) Select(ctx context.Context, name string) error {
 		select {
 		case <-process.done:
 			cancel()
+			process.client.Close()
 		case <-lifetime.Done():
 		}
 	}()
@@ -208,5 +209,5 @@ func (m *ContextManager) Handler() http.Handler {
 		default:
 			m.serveCluster(w, r)
 		}
-	}), "/api/context")
+	}), "/api/context", "/api/pods/query")
 }

@@ -2,7 +2,6 @@ package explorer
 
 import (
 	"sort"
-	"strings"
 )
 
 type RiskSummary struct {
@@ -133,26 +132,4 @@ func assessPod(pod Object, s Snapshot, options ...AssessmentOptions) SecurityRep
 	}
 	report.finish()
 	return report
-}
-
-func inventoryPods(s Snapshot, filter string, options ...AssessmentOptions) []PodView {
-	pods := []PodView{}
-	for _, pod := range s.items("pods") {
-		if strings.Contains(name(pod), filter) {
-			view := podView(pod, s)
-			view.Risk = assessPod(pod, s, options...).Risk
-			pods = append(pods, view)
-		}
-	}
-	sort.Slice(pods, func(i, j int) bool {
-		a, b := pods[i], pods[j]
-		if a.Risk.Score != b.Risk.Score {
-			return a.Risk.Score > b.Risk.Score
-		}
-		if (a.Risk.Unknown > 0) != (b.Risk.Unknown > 0) {
-			return a.Risk.Unknown > 0
-		}
-		return a.Namespace+"/"+a.Name < b.Namespace+"/"+b.Name
-	})
-	return pods
 }

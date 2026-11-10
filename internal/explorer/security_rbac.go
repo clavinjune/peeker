@@ -9,8 +9,10 @@ var rbacCollections = map[string]bool{"roles": true, "rolebindings": true, "clus
 
 type permissionGrant struct {
 	rule     Object
-	cluster  bool
+	binding  Ref
+	role     Ref
 	evidence []Evidence
+	cluster  bool
 }
 
 func boundServiceAccount(binding Object, ns, account string) bool {
@@ -41,6 +43,24 @@ func boundServiceAccount(binding Object, ns, account string) bool {
 }
 
 func accountGrants(ns, account string, s Snapshot) ([]permissionGrant, []Evidence) {
+	x := s["rolebindings"].index
+	if x == nil || x.grants == nil {
+		return collectGrants(ns, account, s)
+	}
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	key := ns + "/" + account
+	if result, ok := x.grants[key]; ok {
+		return result.grants, result.gaps
+	}
+	grants, gaps := collectGrants(ns, account, s)
+	if len(x.grants) < 4096 {
+		x.grants[key] = grantResult{grants, gaps}
+	}
+	return grants, gaps
+}
+
+func collectGrants(ns, account string, s Snapshot) ([]permissionGrant, []Evidence) {
 	grants, gaps := []permissionGrant{}, []Evidence{}
 	for _, key := range []string{"roles", "rolebindings", "clusterroles", "clusterrolebindings"} {
 		if !s.available(key) {
@@ -48,7 +68,7 @@ func accountGrants(ns, account string, s Snapshot) ([]permissionGrant, []Evidenc
 		}
 	}
 	for _, key := range []string{"rolebindings", "clusterrolebindings"} {
-		for _, binding := range s.items(key) {
+		for _, binding := range s.bindings(key, ns, account) {
 			if !boundServiceAccount(binding, ns, account) {
 				continue
 			}
@@ -77,7 +97,7 @@ func accountGrants(ns, account string, s Snapshot) ([]permissionGrant, []Evidenc
 				if len(arr(obj(rule)["resourceNames"])) > 0 {
 					constraint = "; restricted to named resources"
 				}
-				grants = append(grants, permissionGrant{obj(rule), key == "clusterrolebindings", []Evidence{
+				grants = append(grants, permissionGrant{rule: obj(rule), cluster: key == "clusterrolebindings", binding: ref(binding), role: ref(role), evidence: []Evidence{
 					{ref(binding), "subjects / roleRef", "Service-account identity matches this binding; scope: " + scope + constraint + "."},
 					{ref(role), fmt.Sprintf("rules[%d]", i), "API groups " + jsonText(obj(rule)["apiGroups"]) + "; resources " + jsonText(obj(rule)["resources"]) + "; verbs " + jsonText(obj(rule)["verbs"]) + constraint + "."},
 				}})

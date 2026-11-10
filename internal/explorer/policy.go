@@ -239,6 +239,11 @@ func peerDescription(peer Object, policyNS string, s Snapshot) (string, string, 
 	if !s.available("pods") {
 		evaluationError = fmt.Errorf("pods unavailable")
 	}
+	if x := s["pods"].index; x != nil && x.scope != "" {
+		if _, crossNamespace := peer["namespaceSelector"]; crossNamespace {
+			evaluationError = fmt.Errorf("pod inventory covers namespace %s only; cross-namespace matches are not enumerated", x.scope)
+		}
+	}
 	for _, p := range s.items("pods") {
 		ok, err := peerMatches(peer, policyNS, p, s)
 		if err != nil {
@@ -265,7 +270,7 @@ func networkPolicies(pod Object, s Snapshot) PolicyAnalysis {
 	id := a.Graph.resource(ref(pod))
 	a.Ingress = evaluateDirection("ingress", pod, s, &a.Graph, id)
 	a.Egress = evaluateDirection("egress", pod, s, &a.Graph, id)
-	for _, p := range s.items("networkpolicies") {
+	for _, p := range s.inNamespace("networkpolicies", namespace(pod)) {
 		if namespace(p) != namespace(pod) {
 			continue
 		}
@@ -305,7 +310,7 @@ func evaluateDirection(direction string, pod Object, s Snapshot, g *Graph, id st
 		return directionNode(direction, id, g, d)
 	}
 	isolated, allowed, uncertain := false, false, false
-	for _, p := range s.items("networkpolicies") {
+	for _, p := range s.inNamespace("networkpolicies", namespace(pod)) {
 		if namespace(p) != namespace(pod) {
 			continue
 		}
@@ -344,7 +349,7 @@ func evaluateDirection(direction string, pod Object, s Snapshot, g *Graph, id st
 				peers = []any{map[string]any{}}
 			}
 			for j, v := range peers {
-				label, description, peerErr := peerDescription(obj(v), namespace(p), s)
+				label, description, peerErr := cachedPeerDescription(obj(v), namespace(p), s)
 				state := "allowed"
 				if portErr != nil || peerErr != nil {
 					state = "unknown"
@@ -432,7 +437,7 @@ func selectedCiliumRules(pod Object, s Snapshot) []selectedRule {
 			if namespace(p) != "" && namespace(p) != namespace(pod) {
 				continue
 			}
-			specs := arr(p["specs"])
+			specs := append([]any{}, arr(p["specs"])...)
 			fields := []string{}
 			for i := range specs {
 				fields = append(fields, fmt.Sprintf("specs[%d]", i))
