@@ -3,7 +3,13 @@ package explorer
 import "net/netip"
 
 func (d *Direction) recordOpenRule(rule, peer Object, state string, evidence Evidence) {
-	if state != "allowed" || len(arr(rule["ports"])) != 0 || peer == nil {
+	ports := arr(rule["ports"])
+	broadPorts := len(ports) == 0
+	for _, value := range ports {
+		port := obj(value)
+		broadPorts = broadPorts || (port["port"] == nil && port["endPort"] == nil) || (port["port"] == float64(1) && port["endPort"] == float64(65535))
+	}
+	if state != "allowed" || !broadPorts || peer == nil {
 		return
 	}
 	if len(peer) == 0 {
