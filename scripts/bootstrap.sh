@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-test "$(go env GOVERSION)" = go1.27.3 || { echo 'Go 1.27.3 is required; no substitution permitted.' >&2; exit 1; }
+test "$(go env GOVERSION)" = go1.27.4 || { echo 'Go 1.27.4 is required; no substitution permitted.' >&2; exit 1; }
 test "$(uname -s)/$(uname -m)" = Darwin/arm64 || { echo 'This bootstrap pins the verified macOS arm64 archives. Select and verify official archives for another platform.' >&2; exit 1; }
 mkdir -p .tools .local
 DOWNLOAD=$(mktemp -d "$PWD/.local/download.XXXXXX")

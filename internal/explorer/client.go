@@ -40,6 +40,7 @@ var resources = []resource{
 	{"ingresses", "networking.k8s.io", "ingresses", "Ingress", []string{"v1"}, true},
 	{"endpointslices", "discovery.k8s.io", "endpointslices", "EndpointSlice", []string{"v1"}, true},
 	{"ciliumnetworkpolicies", "cilium.io", "ciliumnetworkpolicies", "CiliumNetworkPolicy", []string{"v2"}, true},
+	{"ciliumendpoints", "cilium.io", "ciliumendpoints", "CiliumEndpoint", []string{"v2"}, true},
 	{"ciliumclusterwidenetworkpolicies", "cilium.io", "ciliumclusterwidenetworkpolicies", "CiliumClusterwideNetworkPolicy", []string{"v2"}, false},
 	{"virtualservices", "networking.istio.io", "virtualservices", "VirtualService", []string{"v1", "v1beta1"}, true},
 	{"istiogateways", "networking.istio.io", "gateways", "Gateway", []string{"v1", "v1beta1"}, true},
@@ -51,15 +52,16 @@ var resources = []resource{
 }
 
 type Client struct {
-	http       *http.Client
-	cancel     context.CancelFunc
-	cache      map[string]*collectionRead
-	reads      chan struct{}
-	ctx        context.Context
-	base       string
-	cacheMu    sync.Mutex
-	pending    int
-	Assessment AssessmentOptions
+	registryContext string
+	http            *http.Client
+	cancel          context.CancelFunc
+	cache           map[string]*collectionRead
+	reads           chan struct{}
+	ctx             context.Context
+	base            string
+	cacheMu         sync.Mutex
+	pending         int
+	Assessment      AssessmentOptions
 }
 
 func NewClient(raw string) (*Client, error) {

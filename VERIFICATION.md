@@ -1,6 +1,118 @@
 # Verification — 2026-11-11
 
-Executed on macOS arm64. The v0.0.2 checks below use controlled loopback fixtures; earlier sections also record live **rancher-desktop** verification. These are observed results, not expected outputs. Peeker keeps cluster data in bounded, short-lived memory and has no database.
+Executed on macOS arm64. The v0.0.3 Registry checks include controlled loopback fixtures, real image scans, live Cilium containment, and live orphan/kill/storage checks on disposable **rancher-desktop** workloads. These are observed results, not expected outputs. Peeker keeps cluster data in bounded, session-local memory and has no database.
+
+## v0.0.3 Explore / Registry verification
+
+The existing Pod workspace is now `/explore`; `/registry` adds UID-bound controller registrations, template/live-Pod evidence, image scanning and explicit responder actions.
+
+```text
+bash scripts/build.sh: passed on Go 1.27.4; frozen dependencies, TypeScript, 920 Vite modules, React SSG, embedded binary
+bash -n scripts/bootstrap.sh scripts/setup.sh scripts/build.sh: passed
+bun test (web): 10 passed, 48 assertions
+python3 -m unittest discover -s scripts -p 'test_*.py': 4 passed
+go test -race ./...: passed across all packages, including 12 new Registry/action tests
+go vet ./...: passed
+go mod verify: all modules verified
+go tool deadcode ./...: no unreachable functions reported
+go tool govulncheck ./...: no vulnerabilities found with Go 1.27.4
+bun audit --cwd web: no vulnerabilities found across 88 packages
+Semgrep p/security-audit + p/secrets: 175 applicable rules, 80 files, zero findings and zero parse errors
+git diff --cached --check (source/docs; generated assets excluded): passed
+```
+
+- The initial Go 1.27.3 vulnerability check reported `GO-2026-6859` in `net/http`, fixed by Go 1.27.4. The user explicitly approved keeping the concurrent Go 1.27.4/dependency upgrades. Build/bootstrap/setup checks and current documentation now agree; historical verification records below retain their original versions. Node 26.13.0, Bun 1.4.2 and frontend dependency pins remain in place.
+- Registry regression tests exercise supported controller kinds, Pod rejection, UID/context isolation, same-origin/action headers, external-proxy mutation rejection, template/live evidence separation, reference-value redaction, backup-before-mutation, shared identities and mixed subjects, Cilium/host-network/incomplete-inventory refusal, containment retry and partial failure, Deployment/ReplicaSet and CronJob/Job orphan chains, foreground deletion preconditions, and Trivy argument/cancellation boundaries.
+- Chrome exercised the embedded frontend using a synthetic Kubernetes API and fake kubectl proxies on port 8086. Registration, the risk badge, detail/hardening evidence, real asynchronous Trivy results, containment and its backup, Deployment-to-ReplicaSet orphan requests, and the kill-switch completed. The final build showed explicit deletion-request feedback instead of a misleading inaccessible-workload alert. Registry retained the stale UID registration and its downloadable 773-byte Role/RoleBinding YAML backup after deletion and navigation. `/explore` and `/explore/pods/default/web-pod` rendered the preserved inventory and detail tabs.
+- Trivy 0.76.2 scanned the real public `alpine:3.22` image with remote image access, vulnerability-only scanning, telemetry disabled and memory-backed image caching. Its valid CycloneDX report contained **17 components and 1 vulnerability** (30,925 bytes); the browser also displayed the completed report. Counts describe that scan, not a stable property of the mutable tag. Trivy databases and temporary analysis retain Trivy's own local storage behavior.
+- The final Semgrep JSON includes every new production Registry Go file and `web/src/Registry.tsx`; normal test/dependency/generated-file exclusions apply. Publication checks accepted the three embedded static files with no detected credentials, workstation paths, source maps or development entry points. No application exception or hydration warning was observed; the post-delete detail refresh produced an expected HTTP 409 console entry.
+- Ripwire contract checks passed for the checked Registry/backend entry points. Its unchanged `App` signature still triggered a JSX-call arity notice; TypeScript, the build and browser hydration passed. Quality-delta against `a0665b4b3` reports **three gating notices**: similarity between test request builders and short-horizon churn in `App`/`Client`. New-symbol complexity notices remain; Go tests and React callbacks also appear as structural dead-code notices despite execution. This is not a clean quality-gate claim. Vite retains a nonfatal approximately 545 kB JavaScript chunk-size warning.
+
+### Evidence-backed image classification
+
+- Real Trivy integration scans classified `alpine:3.22` as **not-distroless** (16 OS packages; `apk-tools 2.14.13-r0`, `busybox 1.37.0-r20`, `busybox-binsh 1.37.0-r20`) and `gcr.io/distroless/static-debian12:nonroot` as **distroless-consistent** (five OS packages; no recognized shell/package-manager packages). Both reported `linux/arm64` requested and `arm64` scanned. The scanner now explicitly requests the platform and all packages; the earlier implicit Trivy default had selected amd64 on this arm64 host.
+- Resolved digests were `alpine@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f` and `gcr.io/distroless/static-debian12@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab`. These identify the reported scan-time references, not a permanent guarantee about moving tags.
+- Backend cases cover shell/package-manager detection, unsupported/empty inventories, language-package name collisions and duplicate packages. Frontend tests ensure a mutable-tag result never classifies a different pinned/observed digest and choose the latest completed matching result.
+- Chrome scanned Alpine using the latest embedded binary and displayed the classification, digest, architecture, detected tools and limitations on both the SBOM and Hardening pages. The SBOM showed 17 components and one vulnerability. The browser tab, fixture and reader proxy were stopped afterward.
+- Classification is package-database evidence, not filesystem/provenance proof. Manually copied binaries or incomplete inventories can escape detection; absent evidence stays **unknown**. Peeker stores results only in the current context session.
+
+### Response-action scope
+
+Containment, orphaning and kill-switch mutations were verified against controlled fixtures and the disposable live workloads below. The full reader/responder manifests were not applied: the live tests temporarily granted only test-scoped access. Existing workloads/storage were preserved, and no telemetry backend was installed.
+
+Containment requires complete inventories and UID-matched CiliumEndpoints, refuses host-network Pods, and configures explicit ingress/egress denies for **current Pods only** without changing their specs or controller templates. It reports configuration rather than verified enforcement; replacement Pods need another action. Direct unshared RBAC grants are revoked after backup; shared/group/default/Peeker identities and role definitions remain. Orphaning can preserve processes for investigation but removes self-healing and does not prevent external reconciliation. Kill-switch deletion is asynchronous; Peeker issues no PVC/PV deletes. Registrations, scans and backups disappear on reconnect/context switch/process exit, and recovery is manual.
+
+### Live Cilium containment
+
+```text
+python3 scripts/verify-containment.py --context rancher-desktop
+result: PASS
+cleanup: PASS
+backupKinds: ClusterRole, ClusterRoleBinding, Role, RoleBinding
+```
+
+The successful run used a disposable namespace with three non-root BusyBox HTTP Deployments and an explicit allow-all NetworkPolicy. Peeker used the real reader and responder impersonation paths. All six HTTP paths worked before containment; these were the observed results after convergence and a further 20-second stability window:
+
+| HTTP path | Before | After |
+| --- | --- | --- |
+| probe → target | allowed | denied |
+| control → target | allowed | denied |
+| target → probe | allowed | denied |
+| target → control | allowed | denied |
+| probe → control | allowed | allowed |
+| control → probe | allowed | allowed |
+
+- All three Pod UIDs, SHA-256 hashes of Pod specs, container IDs and restart counts were identical before/after; all restart counts stayed **0**. The target Deployment spec was also unchanged.
+- `kubectl auth can-i` with the target ServiceAccount and its normal groups changed direct ConfigMap and namespace grants from **yes → no**. Its shared group ConfigMap grant remained **yes**, and the control ServiceAccount's independent grant remained **yes**. The action reported retained built-in group discovery grants and retained role definitions; containment does not promise zero remaining authorization.
+- The downloaded backup contained original Role, ClusterRole, RoleBinding and ClusterRoleBinding objects. The direct test RoleBinding and ClusterRoleBinding were removed; shared bindings stayed intact.
+- Cleanup removed the disposable namespace, external test RBAC objects and newly created responder ServiceAccount, then stopped Peeker and its proxies. Label-filtered inventory checks returned no remaining test resources; the responder ServiceAccount was absent, no verification processes remained, and ports 58534/8086 had no listeners. No PVC/PV resources were created or deleted by the test.
+- The first attempt timed out waiting for Deployment availability before Peeker started and cleaned up successfully. A rerun with failure diagnostics passed without changing the workloads; the initial startup cause is unconfirmed. Future failures capture disposable Pod/controller status, events, Cilium objects and bounded logs before cleanup.
+- This proves the six tested **new HTTP connections** on this Cilium cluster and stability during the measured window. Long-lived existing connections, other protocols, other nodes/clusters and workloads with network-dependent health probes need their own enforcement checks.
+
+### Orphan propagation race regression
+
+The first live orphan run exposed a real race hidden by synchronous fixtures: deleting a Deployment with orphan propagation asynchronously removed its ReplicaSet's owner reference between Peeker's GET and DELETE, changing `resourceVersion` and returning HTTP 409. The parent disappeared, the ReplicaSet remained, and the test reported failure and cleaned up its namespace and generated volume.
+
+`registryStore.orphanChild` now refreshes on HTTP 409, with at most four attempts and cancellable delays. Every DELETE retains UID/resourceVersion preconditions; replacement UIDs or newly added owner references are refused. Other HTTP/transport failures are not retried. A new regression first reproduced the failure, then passed six cases: detached owner, replacement UID, adoption by another owner, forbidden response, retry limit and cancellation. The existing orphan-chain tests, full explorer and CLI race tests, and explorer vet passed. The embedded binary was rebuilt with `go build -trimpath -o bin/peeker ./cmd/peeker`. Targeted Semgrep scanned both live-verification scripts and the changed action backend: 143 rules, zero findings/errors. Ripwire retains the same three gating notices; new test/harness complexity and size notices remain.
+
+### Live orphan / kill-switch / retained storage
+
+```text
+python3 scripts/verify-containment.py --context rancher-desktop --actions --storage-class local-path
+result: PASS
+cleanup: PASS
+orphan Deployment: Deployment + ReplicaSet removed; Pod unchanged; PID 1 alive
+orphan CronJob: CronJob + scheduled Job removed; Pod unchanged; PID 1 alive
+kill Deployment: Deployment + ReplicaSet + Pod deleted
+kill CronJob: CronJob + scheduled Job + Pod deleted
+kill StatefulSet: StatefulSet + Pod deleted
+storage: PVC/PV UIDs unchanged, Bound after kill; marker survived read-only remount
+```
+
+- The successful run used a disposable namespace, the rebuilt embedded binary, real reader/responder impersonation and namespace-scoped controller-delete permissions. CronJob children were created by the Kubernetes scheduler/controller rather than synthetic owner references.
+- Both orphaned Pods had empty owner references and retained identical UIDs, Pod-spec hashes, container IDs and **0 restarts**. A further **65-second** observation crossed a CronJob scheduling boundary; neither controller chain returned, both Pods remained Running, and `kill -0 1` confirmed their original container processes were alive. This demonstrates the investigation benefit of removing controller-driven replacement, while the UI continues to explain the loss of self-healing and the possibility of external reconciliation.
+- Foreground kill-switch garbage collection removed the listed Deployment/ReplicaSet/Pod and CronJob/Job/Pod chains and the StatefulSet/Pod. The same checks confirmed no Deployment, ReplicaSet, CronJob, Job or StatefulSet remained in the disposable namespace after the observation window.
+- The StatefulSet explicitly used `persistentVolumeClaimRetentionPolicy: {whenDeleted: Retain, whenScaled: Retain}`. Its 16 MiB `local-path` PVC and backing PV retained their original UIDs and stayed Bound after deletion. A separate recovery Pod mounted the retained claim read-only and read the original marker, proving data survival rather than only object survival.
+- After these assertions, test cleanup removed the orphaned/recovery Pods, disposable namespace/PVC, temporary responder identity and permissions, and waited for the generated Delete-reclaim PV to disappear. Follow-up queries found no test namespace/RBAC/ServiceAccount or generated PV, no Peeker/proxy processes, and no listener on port 60424. The earlier failed run also cleaned up its generated volume. No existing workload or storage object was deleted.
+- Coverage is the tested Deployment and CronJob orphan chains, Deployment/CronJob/StatefulSet kill paths, and explicit Retain policy on this local-path provisioner. Other retention policies, operators/GitOps reconciliation and storage provisioners still follow their own Kubernetes behavior; Peeker issues no PVC/PV deletion requests.
+
+Temporary verification services and their child proxies were stopped, and the verification browser tab was closed.
+
+Final generated asset SHA-256 values:
+
+```text
+f5b24082bac78602f9b578666813ac746f06a2e0f96e4364c27b576486634d0d  web/dist/index.html
+e62a6c6407b06ec8a5cc72a469ded9af673183f584c6be9f63ed6e3d8f0ab1c5  web/dist/assets/index-CrGwXJhQ.js
+e66bbba5038c9486d52c98c4559f85ca41a562d89685473b7e813326af398d0e  web/dist/assets/index-DDcKAgJo.css
+```
+
+### Publication privacy review
+
+- Reviewed all **109 publishable files** (all text) and **150 historical Git blobs** before the release commit. Filename/content checks found no sensitive files, real credentials, personal email addresses or actual workstation paths. Commit/tag identities use a public bot handle and GitHub noreply addresses; commit messages and tag annotations were also checked.
+- Removed disposable namespace and Pod/PVC/PV identifiers from this record. Remaining credential/path-shaped matches are intentionally synthetic rejection-test fixtures; private IP ranges are documented configuration or test data.
+- Semgrep `p/secrets` and `p/security-audit` ran 175 applicable rules across 80 files with **zero findings**. Ripwire's injection/exfiltration scan of the embedded agent skill also returned **zero findings**. Generated-asset publication checks passed.
+- The final staged index contained the same 109 reviewed files; a source archive matched their contents exactly. The release notes were checked separately. Whitespace checks passed for source/docs; Vite's generated JavaScript retains five whitespace-only lines in its generated output.
+- Local fixtures, toolchains, dependencies, caches, environment files and binaries are excluded by `.gitignore`. These are publication-focused checks, not a full security audit or a guarantee that automated scanners detect every possible secret.
 
 ## v0.0.2 release verification
 
@@ -126,7 +238,7 @@ Semgrep used `p/security-audit`, `p/golang`, `p/javascript` and `p/secrets` with
 
 The local file-backed module-proxy installation was repeated with 60 publishable files and a fresh consumer module/cache. The exact `go get -tool github.com/clavinjune/peeker/cmd/peeker@latest` command succeeded; `go tool peeker` served embedded HTML, hashed assets, deep links and 24 live risk summaries without a frontend build. The temporary tool process was stopped. The normal loopback service on port 8080 uses the rebuilt binary.
 
-Publication checks accepted exactly three generated assets. An additional publishable-file path/credential check found only the deliberately fake `/Users/example/private` rejection-test string; no actual workstation paths or credentials were found. Ripwire contract checks found no incompatible callers and quality-delta reported zero gating regressions. Non-gating notices include new helper/test complexity and a minor increase in the shared graph's display branches.
+Publication checks accepted exactly three generated assets. An additional publishable-file path/credential check found only a deliberately fake home-directory rejection-test string; no actual workstation paths or credentials were found. Ripwire contract checks found no incompatible callers and quality-delta reported zero gating regressions. Non-gating notices include new helper/test complexity and a minor increase in the shared graph's display branches.
 
 ## Risk scoring and module publication follow-up
 

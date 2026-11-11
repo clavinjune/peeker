@@ -23,7 +23,7 @@ func problem(w http.ResponseWriter, status int, message string) {
 }
 func frontendHandler(assets fs.FS) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" || strings.HasPrefix(r.URL.Path, "/pods/") {
+		if r.URL.Path == "/" || r.URL.Path == "/explore" || strings.HasPrefix(r.URL.Path, "/explore/") || r.URL.Path == "/registry" || strings.HasPrefix(r.URL.Path, "/registry/") || strings.HasPrefix(r.URL.Path, "/pods/") {
 			w.Header().Set("Cache-Control", "no-cache")
 			http.ServeFileFS(w, r, assets, "index.html")
 			return
@@ -45,6 +45,7 @@ func frontendHandler(assets fs.FS) http.Handler {
 
 func Handler(client *Client, assets fs.FS) http.Handler {
 	mux := http.NewServeMux()
+	newRegistry(client).mount(mux)
 	mux.HandleFunc("GET /api/pods/{namespace}/{name}/traffic", trafficHandler(client))
 	inventory := inventoryHandler(client)
 	mux.HandleFunc("GET /api/namespaces", namespaceHandler(client))
@@ -87,7 +88,7 @@ func Handler(client *Client, assets fs.FS) http.Handler {
 	if assets != nil {
 		mux.Handle("GET /", frontendHandler(assets))
 	}
-	return localBoundary(mux, "/api/pods/query")
+	return localBoundary(mux, "/api/pods/query", "/api/registry/change")
 }
 
 func localBoundary(next http.Handler, postPaths ...string) http.Handler {

@@ -32,7 +32,7 @@ rules:
     resources: [endpointslices]
     verbs: [get, list]
   - apiGroups: [cilium.io]
-    resources: [ciliumnetworkpolicies, ciliumclusterwidenetworkpolicies]
+    resources: [ciliumnetworkpolicies, ciliumclusterwidenetworkpolicies, ciliumendpoints]
     verbs: [get, list]
   - apiGroups: [networking.istio.io]
     resources: [virtualservices, gateways, destinationrules]

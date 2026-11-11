@@ -133,7 +133,7 @@ func run(listen, proxy, contextName string, expectIstio, stdio bool) error {
 		server.Shutdown(shutdown)
 		close(closed)
 	}()
-	log.Printf("Peeker at http://%s; read-only; cluster data in memory", listen)
+	log.Printf("Peeker at http://%s; Explore read-only; Registry actions use peeker-responder; cluster data in memory", listen)
 	err = server.ListenAndServe()
 	stop()
 	<-closed

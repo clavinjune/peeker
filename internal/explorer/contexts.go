@@ -122,6 +122,7 @@ func (m *ContextManager) Select(ctx context.Context, name string) error {
 	}
 	lifetime, cancel := context.WithCancel(context.Background())
 	process.client.Assessment = m.Assessment
+	process.client.registryContext = name
 	m.session = &contextSession{process, lifetime, cancel, Handler(process.client, m.assets)}
 	go func() {
 		select {
@@ -209,5 +210,5 @@ func (m *ContextManager) Handler() http.Handler {
 		default:
 			m.serveCluster(w, r)
 		}
-	}), "/api/context", "/api/pods/query")
+	}), "/api/context", "/api/pods/query", "/api/registry/change")
 }

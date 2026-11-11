@@ -34,7 +34,7 @@ def check_dist(root):
                 raise ValueError(f"{label} detected in {relative}")
         files.append(relative)
     index = (root / "index.html").read_text(encoding="utf-8")
-    if '<div id="root"></div>' in index or "CLUSTER INVENTORY" not in index:
+    if '<div id="root"></div>' in index or "KUBERNETES SECURITY" not in index:
         raise ValueError("index.html must contain the static application shell")
     links = re.findall(r'(?:src|href)="/([^\"]+)"', index)
     if not any(p.endswith(".js") for p in links) or not any(p.endswith(".css") for p in links):

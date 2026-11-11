@@ -21,14 +21,14 @@ func TestEmbeddedPrerenderedFrontend(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := string(index)
-	if !strings.Contains(html, ">CLUSTER INVENTORY<") || strings.Contains(html, `<div id="root"></div>`) {
+	if !strings.Contains(html, ">KUBERNETES SECURITY<") || strings.Contains(html, `<div id="root"></div>`) {
 		t.Fatal("embedded index must contain prerendered application HTML")
 	}
 	links := regexp.MustCompile(`(?:src|href)="(/assets/[^\"]+)"`).FindAllStringSubmatch(html, -1)
 	if len(links) < 2 {
 		t.Fatal("expected built JavaScript and CSS links")
 	}
-	paths := []string{"/", "/pods/demo/web"}
+	paths := []string{"/", "/pods/demo/web", "/explore", "/explore/pods/demo/web", "/registry", "/registry/Deployment/demo/web/uid", "/registry/sbom/example"}
 	for _, link := range links {
 		paths = append(paths, link[1])
 	}

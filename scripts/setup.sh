@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-test "$(go env GOVERSION)" = go1.27.3
+test "$(go env GOVERSION)" = go1.27.4
 test "$(.tools/node/bin/node --version)" = v26.13.0
 kubectl --context rancher-desktop --request-timeout=15s cluster-info
 rdctl list-settings | python3 -c 'import json,sys; s=json.load(sys.stdin); assert s["kubernetes"]["enabled"]; assert not s["kubernetes"]["options"]["flannel"], "Flannel is enabled. Read the README networking prerequisite before installing Cilium."'

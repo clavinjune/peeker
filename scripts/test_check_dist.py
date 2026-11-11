@@ -15,7 +15,7 @@ class PublicationChecks(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         (self.root / "assets").mkdir()
-        (self.root / "index.html").write_text('<div id="root">CLUSTER INVENTORY</div><script src="/assets/app-abc.js"></script><link href="/assets/app-abc.css">')
+        (self.root / "index.html").write_text('<div id="root">KUBERNETES SECURITY</div><script src="/assets/app-abc.js"></script><link href="/assets/app-abc.css">')
         (self.root / "assets/app-abc.js").write_text("console.log('app')")
         (self.root / "assets/app-abc.css").write_text("body { margin: 0 }")
 

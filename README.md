@@ -1,12 +1,12 @@
 # Peeker
 
-A local, read-only Kubernetes security explorer with context and namespace selectors. The first page prioritizes pods by configuration risk; compact findings explain pod hardening and service-account permissions, with expandable actions and evidence. Pod pages also explain ownership, network policies, Services and routes, and show live HTTP traffic from Istio access logs. **Cluster data stays in memory: no database, persistent application inventory, credentials in the browser, or telemetry backend.** Resource reads expire after 20 seconds; inventory pages retain a snapshot for at most two minutes. Context changes cancel reads and discard that session's cached data. Only your workload-hiding preferences are saved in browser storage, separately for each context.
+A local Kubernetes security workspace with **Explore** at `/explore` and **Registry** at `/registry`. Explore preserves the read-only, risk-prioritized Pod inventory, permissions, policies, routes and live Istio access-log traffic. Registry registers controller workloads in memory, compares templates with running Pods, scans images with Trivy, and provides explicit response actions through a separate responder identity. **Cluster data stays in memory: no database, persistent application inventory, credentials in the browser, or telemetry backend.** Resource reads expire after 20 seconds; Explore pages retain snapshots for at most two minutes. Context changes cancel reads/scans and discard registrations, results and backups. Explore hiding preferences remain browser-local and context-specific; Registry hiding lasts for the current view.
 
 The production frontend is statically generated at build time and embedded in the Go executable. Deploy just the binary; it serves the HTML, JavaScript, CSS and API from one loopback address.
 
 ## Install as a Go tool
 
-With Go 1.27.3, inside an existing Go module (or run `go mod init example.com/peeker-tools` in a new directory):
+With Go 1.27.4, inside an existing Go module (or run `go mod init example.com/peeker-tools` in a new directory):
 
 ```sh
 go get -tool github.com/clavinjune/peeker/cmd/peeker@latest
@@ -15,13 +15,42 @@ go tool peeker
 
 Open **http://127.0.0.1:8080** and choose a Kubernetes context. This records a tool dependency in the consumer's `go.mod`; run it with `go tool peeker`. No Node, Bun or frontend build is needed. Install `kubectl` and configure the read-only Kubernetes identity described below in each cluster you want to inspect. The downloaded module includes its setup manifests; locate it with `go list -m -f '{{.Dir}}' github.com/clavinjune/peeker`.
 
-Use `@v0.0.2` instead of `@latest` to pin this release.
+Use `@v0.0.3` instead of `@latest` to pin this release.
+
+## Registry (v0.0.3)
+
+- Register Deployment, StatefulSet, DaemonSet, Job and CronJob controllers by Kubernetes UID. Pods are evidence, not registrable entries. Replacements require a new registration; missing registrations can be removed. Up to 256 entries are retained per context session.
+- Inspect declared templates separately from up to 100 UID-owned live Pods. Evidence includes hardening, host namespaces, digest pinning, ServiceAccounts and configured RBAC, Kubernetes/Cilium policies, Services including LoadBalancers, Ingress/Istio/Gateway API relationships, Secret/ConfigMap reference names, and per-Pod Istio traffic. No Secret or ConfigMap contents or literal environment values are fetched or displayed.
+- Recommendations combine the existing scored findings/remediations with workload-level guidance. After scanning, Hardening and the SBOM page classify the actual OS package inventory: recognized shells/package managers provide **not-distroless** evidence; a supported inventory without them is **distroless-consistent**; missing/unsupported inventories remain **unknown**. Evidence names the packages/versions, resolved digest, requested platform and scanned architecture. This is package-database evidence, not a filesystem/provenance attestation: manually copied binaries or incomplete databases can escape detection. Image names never determine the classification, and mutable-tag results are not attached to a different observed/pinned digest. Runtime defaults, admission changes and mounted-volume writability require separate evidence.
+- Install **Trivy 0.76.2** on the Peeker host, then use **Scan image with Trivy → SBOM** in Hardening. Live Pods prefer an observed pullable digest. Template tags can move; Peeker explicitly requests `linux/{host architecture}` for multi-platform references and displays the actual scanned architecture from the SBOM. The scan includes all reported packages and produces CycloneDX components and vulnerability evidence, viewable/downloadable at `/registry/sbom/{id}`. Private images use host-side Trivy/registry credentials, not Kubernetes Secret reads. Scans use remote image access, disable telemetry and Secret scanning, and have a five-minute process deadline, a 1 GB image limit and 8 MiB output limit. One scan runs at a time, with eight results per session. Trivy's image cache is memory-backed; its vulnerability databases and temporary analysis files follow Trivy's local storage behavior. Peeker does not persist scan results.
+
+### Workload response actions
+
+Use a managed kubeconfig context. Apply `cluster/reader.yaml` for CiliumEndpoint reads and, with an authorized administrator, install the optional `cluster/responder.yaml`. The local kubeconfig caller must be allowed to impersonate `system:serviceaccount:peeker-system:peeker-responder` and its service-account/authenticated groups. The example binding grants its narrow verb/resource set cluster-wide; operators can instead bind its ClusterRole in individual namespaces and omit cluster-wide grant revocation. This identity never reads Secrets, execs into Pods or deletes storage directly.
+
+Actions require registration, same-origin JSON, action/context headers and typed workload-name confirmation in the UI. A short-lived, separately impersonated responder proxy runs only for the action. Explore and MCP retain their read-only transport. External `--proxy` mode supports registration/evidence/scans but disables workload mutations. There is no credential fallback. Deletes use UID/resourceVersion preconditions; patches test both fields. Actions are serialized per context session and stop on a conflict/error, returning completed steps and any backup for partial recovery.
+
+**Contain network** requires complete Pod/controller/RBAC inventories and a matching CiliumEndpoint for every current target Pod; host-network Pods are refused. It first saves matching Role, ClusterRole, RoleBinding and ClusterRoleBinding objects as an in-memory YAML document stream (JSON documents are valid YAML), creates a uniquely selected Cilium ingress/egress deny policy, and labels existing Pods without changing their specs or controller templates. Cilium explicit denies override additive allows; a Kubernetes default-deny policy alone cannot do this. Policy creation is configuration evidence, not proof of enforcement. Existing connections, Cilium enforcement settings and network-dependent probes need cluster verification. Future/replacement Pods are outside this current-Pod action and require containment again. Unrelated workloads are not selected by the generated label. Operations across resources are not an atomic cluster transaction; concurrent reconcilers can change the situation.
+
+After network configuration, direct RBAC grants are removed only for unshared, non-default workload ServiceAccounts. Sole-subject bindings are deleted; mixed bindings retain other subjects. Shared/group grants, default/Peeker accounts and Role/ClusterRole definitions remain; roles may be shared or aggregated, and definitions alone do not grant access. Binding edits can also be refused by Kubernetes bind/escalation checks. Remaining grants are reported, so the result does **not** claim all credentials or permissions are revoked. Download backups before switching/reconnecting/stopping Peeker: at most 32 backups of 4 MiB each are retained in memory. Restore manually after reviewing current UIDs/resourceVersions and retained subjects; no automatic rollback overwrites concurrent changes.
+
+**Make it orphan** requests orphan deletion of the registered controller and its intermediate ReplicaSets/Jobs, allowing current Pods to continue after Kubernetes detaches owners. This can preserve a process for investigation while stopping its controller's replacement loop. It removes self-healing, is not network isolation, and does not stop external GitOps/operators or parent schedulers from recreating controllers. Partial deletion is reported.
+
+**Kill-switch** requests foreground deletion of the registered workload and its dependents. Kubernetes performs garbage collection asynchronously. Storage follows Kubernetes retention/owner-reference behavior; Peeker issues no PVC/PV deletes.
+
+### Opt-in verification
+
+`PEEKER_VERIFY_IMAGES=1 go test ./internal/explorer -run '^TestTrivyImageClassificationIntegration$' -count=1 -v` scans real public Alpine and distroless images and checks classification, digest and architecture.
+
+`python3 scripts/verify-containment.py --context CONTEXT` runs the built `bin/peeker` against a Cilium-enabled cluster. It creates a uniquely named disposable namespace with three non-root HTTP workloads, an allow-all policy, direct and shared RBAC grants, and temporary test-scoped reader/responder permissions. It checks ingress/egress denial, control-workload connectivity, unchanged Pod UIDs/specs/container IDs/restart counts, YAML backups and remaining permissions. It stops Peeker and removes its created resources in a `finally` cleanup; existing reader/responder objects are not overwritten. This requires cluster-admin-equivalent setup/impersonation permissions and installed reader access. Results are printed as JSON; see `VERIFICATION.md` for observed coverage and limits.
+
+Add `--actions --storage-class local-path` to verify orphaning and kill-switch instead. This creates live Deployment/ReplicaSet and scheduled CronJob/Job chains, plus a StatefulSet with a small disposable PVC and explicit `Retain` claim policy. It checks orphaned Pod identity/process/restart stability across a scheduling boundary, foreground deletion of controllers and dependent Pods, and PVC/PV identity plus data survival after remount. The selected dynamic storage class must use `Delete` reclaim policy: after proving retention during the action, test cleanup removes its namespace/PVC and waits for its generated PV to disappear. It also removes temporary responder access and stops Peeker.
 
 ## Versions
 
 | Component | Pin |
 | --- | --- |
-| Go | 1.27.3 |
+| Go | 1.27.4 |
 | Node.js | 26.13.0 |
 | Bun | 1.4.2 |
 | Rancher Desktop inspected | 1.24.0, macOS arm64, Moby |
@@ -157,7 +186,7 @@ kubectl --context rancher-desktop -n istio-system port-forward --address=127.0.0
 
 Kiali may still render zero-RPS or “no traffic” placeholders in its overview when metrics are disabled; these are not measurements. This Istio release injects `istio-proxy` as a native restartable init-container sidecar. Peeker and the verification script count its readiness alongside application containers.
 
-## Read-only boundary and architecture
+## Transport boundaries and architecture
 
 Browser → same-origin Go API → fixed allowlisted Kubernetes reads through `kubectl proxy` → selected context. Vite proxies only `/api` to Go during development. Production assets are served from Go's embedded read-only filesystem. No database or external application services are needed.
 
@@ -167,7 +196,7 @@ Browser → same-origin Go API → fixed allowlisted Kubernetes reads through `k
 - `web/scripts/prerender.mjs` uses React's `renderToString` to generate the application shell, headings, context controls and loading state inside `web/dist/index.html` after Vite builds the JavaScript and CSS. It runs with Bun and the existing dependencies.
 - `web/src/main.tsx` hydrates generated HTML in production and mounts normally under Vite development.
 - `web/embed.go` embeds only `dist/index.html` and `dist/assets` with Go's required `//go:embed` compiler directive.
-- `cmd/peeker/main.go` passes that embedded filesystem to the HTTP handler. The handler serves the shell for `/` and direct `/pods/{namespace}/{name}` navigation, and serves files under `/assets/`. Asset directory listings and source-file access return 404. HTML is revalidated; hashed assets have immutable caching.
+- `cmd/peeker/main.go` passes that embedded filesystem to the HTTP handler. The handler serves the shell for `/explore`, `/explore/pods/{namespace}/{name}`, `/registry` and Registry detail/SBOM routes; old `/pods/...` links still work and `/` opens Explore. Files are served under `/assets/`. Asset directory listings and source-file access return 404. HTML is revalidated; hashed assets have immutable caching.
 
 SSG covers the application shell. Kubernetes inventory, pod details and graphs remain live client-side API reads after hydration; builds require no cluster connection and contain no cluster snapshots or credentials. Pod URLs use the same generated shell and load their current details in the browser. JavaScript is required for live data and interaction. There is no runtime server-side React renderer and no Node/Bun runtime in production.
 
@@ -189,12 +218,16 @@ Go exposes only:
 - `GET /api/pods/{namespace}/{name}`
 - `GET /api/pods/{namespace}/{name}/traffic?uid=...` (bounded server-sent events or an explicit availability state)
 - `POST /mcp` (read-only agent tools over Streamable HTTP)
+- `GET /api/registry?namespace=...`
+- `GET /api/registry/workload?kind=...&namespace=...&name=...&uid=...`
+- `GET /api/registry/scan?id=...` and `GET /api/registry/backup?id=...`
+- `POST /api/registry/change` (register, unregister, scan, contain, orphan or kill)
 
-Every non-GET method except local context selection, inventory queries and MCP POSTs is rejected before contacting Kubernetes. Context selection and inventory queries require an exact same-origin Origin, JSON content type, action header and bounded payload. Inventory queries accept at most 1 MiB and 4,096 hidden keys, with up to 500 returned rows (100 in the browser). Context names must come from fresh kubectl discovery. Commands use fixed argument arrays without a shell. There are no Kubernetes mutation, exec, attach, arbitrary proxy, or arbitrary resource endpoints. Names are validated. The HTTP client only makes GET requests to fixed resource/discovery paths, bounds response size and pagination, times out, and refuses redirects. The frontend receives selected pod identity fields, not pod environments, volume credentials, service account tokens, Secrets or kubeconfig. Loopback Host and same-origin checks prevent exposing reads via an arbitrary website's origin or DNS rebinding.
+Every non-GET method except the exact context, inventory, Registry and MCP POST endpoints is rejected before contacting Kubernetes. Context selection, inventory queries and Registry changes require an exact same-origin Origin, JSON content type, action header and bounded payload. Registry accepts at most 4 KiB. Inventory queries accept at most 1 MiB and 4,096 hidden keys, with up to 500 returned rows (100 in the browser). Context names come from fresh kubectl discovery. Commands use fixed argument arrays without a shell. There are no exec, attach, arbitrary proxy or arbitrary resource endpoints. Names are validated. Explore uses GET-only fixed resource/discovery paths; Registry mutations use the separate responder path described above. HTTP clients bound responses, time out, and refuse redirects. The frontend receives curated fields, not pod environments, volume credentials, tokens, Secrets or kubeconfig. Loopback Host and same-origin checks reject arbitrary website origins and DNS rebinding.
 
 `cluster/reader.yaml` defines a get/list-only ServiceAccount identity. Managed proxies use the selected context **with impersonation of that identity**, including its service-account groups; `scripts/proxy.sh` does the same for Rancher Desktop. The underlying caller must have impersonation permission. The proxy also rejects mutating HTTP methods. The original kubeconfig remains on the host and is read only by kubectl; Peeker requests only context names. Alternatively, start an external proxy with a kubeconfig containing a short-lived token for `peeker-system/peeker-reader`, omitting impersonation flags. Keep that kubeconfig outside the repo and renew the token when it expires. A proxy using unmodified admin credentials is **not** made read-only by being a proxy.
 
-Read permissions: namespaces, pods, Services, ServiceAccounts, replicationcontrollers; Roles/RoleBindings/ClusterRoles/ClusterRoleBindings; apps deployments/replicasets/statefulsets/daemonsets; batch jobs/cronjobs; NetworkPolicies/Ingresses; EndpointSlices; Cilium namespaced/clusterwide policies; Istio VirtualServices/Gateways/DestinationRules; Gateway API HTTPRoutes/TCPRoutes/Gateways/ReferenceGrants; discovery GETs; `get` on `pods/log`. No Secrets, exec/attach, watches, or writes are granted. Kubernetes RBAC cannot restrict logs by container name: this identity can read other containers' logs, while Peeker fixes its log requests to `istio-proxy` and exposes only aggregates. Discovery failure is distinct from missing APIs; denied and disconnected reads remain errors, never empty inventories. Existing installations should reapply `cluster/reader.yaml` for the added read permissions.
+Read permissions: namespaces, pods, Services, ServiceAccounts, replicationcontrollers; Roles/RoleBindings/ClusterRoles/ClusterRoleBindings; apps deployments/replicasets/statefulsets/daemonsets; batch jobs/cronjobs; NetworkPolicies/Ingresses; EndpointSlices; Cilium namespaced/clusterwide policies and CiliumEndpoints; Istio VirtualServices/Gateways/DestinationRules; Gateway API HTTPRoutes/TCPRoutes/Gateways/ReferenceGrants; discovery GETs; `get` on `pods/log`. No Secrets, exec/attach, watches, or writes are granted to the reader. Kubernetes RBAC cannot restrict logs by container name: this identity can read other containers' logs, while Peeker fixes its log requests to `istio-proxy` and exposes only aggregates. Discovery failure is distinct from missing APIs; denied and disconnected reads remain errors, never empty inventories. Existing installations should reapply `cluster/reader.yaml` for the added read permissions.
 
 ## MCP and agent skill
 

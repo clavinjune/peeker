@@ -8,7 +8,7 @@ Use:
 - Istio in sidecar mode
 - Istio Bookinfo as the example microservices application
 - Kiali
-- Go 1.27.3
+- Go 1.27.4
 - Node.js v26.13.0
 - Bun for frontend package management and scripts
 - React, TypeScript, tsc, and Mantine UI from mantine.dev

@@ -118,8 +118,12 @@ func (o *proxyOutput) Write(p []byte) (int, error) {
 }
 
 func (kubectlRunner) start(ctx context.Context, name string) (*proxyProcess, error) {
+	return startProxy(ctx, proxyArguments(name))
+}
+
+func startProxy(ctx context.Context, args []string) (*proxyProcess, error) {
 	lifetime, stop := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(lifetime, "kubectl", proxyArguments(name)...)
+	cmd := exec.CommandContext(lifetime, "kubectl", args...)
 	output := &proxyOutput{ready: make(chan string, 1)}
 	cmd.Stdout, cmd.Stderr, cmd.WaitDelay = output, io.Discard, time.Second
 	if cmd.Start() != nil {

@@ -68,5 +68,5 @@ func mcpHTTPHandler(api, transport http.Handler) http.Handler {
 		}
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		transport.ServeHTTP(w, r.WithContext(context.WithValue(ctx, mcpRequestLifetime{}, ctx)))
-	}), "/api/context", "/api/pods/query", "/mcp")
+	}), "/api/context", "/api/pods/query", "/api/registry/change", "/mcp")
 }

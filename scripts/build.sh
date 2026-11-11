@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$PWD/.tools/node/bin:$PATH"
-test "$(go env GOVERSION)" = go1.27.3
+test "$(go env GOVERSION)" = go1.27.4
 test "$(node --version)" = v26.13.0
 test "$(bun --version)" = 1.4.2
 bun install --frozen-lockfile --cwd web

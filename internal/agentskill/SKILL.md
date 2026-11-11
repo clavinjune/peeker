@@ -5,6 +5,8 @@ description: Audit Kubernetes workload configuration with Peeker's local read-on
 
 # Peeker cluster audit
 
+Explore is available at `/explore`. The separate `/registry` UI can register controller workloads, scan images and perform explicitly authorized responder actions; those mutations are not MCP tools. Keep this skill's audit workflow read-only.
+
 ## Connect
 
 Start Peeker with `peeker -context CONTEXT` (or `go tool peeker -context CONTEXT`), using the context requested by the user. Alternatively, open http://127.0.0.1:8080 and choose the context there. Each cluster requires the Peeker reader identity and local impersonation permissions. Context selection is shared with the browser.
